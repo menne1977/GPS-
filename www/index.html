@@ -11,6 +11,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font-family
 #app{display:flex;flex-wrap:wrap;gap:8px;padding:8px;height:100%;align-content:flex-start;overflow:auto;padding-top:48px}
 .w{background:var(--card);border-radius:14px;padding:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1 1 160px;min-width:120px;min-height:110px;position:relative;text-align:center}
 .w h4{margin:0 0 4px;font-size:11px;color:var(--mut);font-weight:500;letter-spacing:.5px}
+#b-speed{width:100%}
 .big{font-size:calc(var(--s,1)*64px);font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
 .unit{font-size:14px;color:var(--mut)}
 .small{font-size:calc(var(--s,1)*13px);color:var(--mut);margin-top:4px}
@@ -60,25 +61,27 @@ const TAB={DE:{urban:50,rural:100,motorway:130},AT:{urban:50,rural:100,motorway:
 FR:{urban:50,rural:80,motorway:130},IT:{urban:50,rural:90,motorway:130},NL:{urban:50,rural:80,motorway:100},PL:{urban:50,rural:90,motorway:140}};
 const WX={0:'Sonne',1:'überwiegend sonnig',2:'teils bewölkt',3:'bedeckt',45:'Nebel',48:'Nebel',51:'Niesel',53:'Niesel',55:'Niesel',61:'Regen',63:'Regen',65:'starker Regen',71:'Schnee',73:'Schnee',75:'starker Schnee',80:'Schauer',81:'Schauer',82:'starke Schauer',95:'Gewitter',96:'Gewitter mit Hagel',99:'Gewitter mit Hagel'};
 // Abfrage-Intervalle in Minuten; Datenquellen einzeln schaltbar, Datensparmodus schaltet alle Abrufe ab.
-const DEF={global:{analog:false,awake:true,orient:'off',tol:5,tpl:'{speed} km/h · {temp}°C · Limit {limit}',sparmodus:false,
+const DEF={global:{analog:false,awake:true,orient:'off',tol:5,tpl:'{speed} km/h · {temp}°C · Limit {limit}',sparmodus:false,style:'digital',
  src:{weather:true,dwd:true,fuel:true,limit:true,heat:true,sat:true,autobahn:true},iv:{weather:30,dwd:15,fuel:30},fuelKm:5,},
  widgets:{},trip:{total:0,trip:0},day:{d:'',max:0,mt:0,dist:0},reports:[],last:{}};
 WIDGETS.forEach(w=>DEF.widgets[w.id]={on:true,color:'#e8eef5',scale:1});
 function load(){try{const x=JSON.parse(localStorage.getItem('gpsdash')||'null');if(x){const d=structuredClone(DEF);return Object.assign(d,x,{global:Object.assign(d.global,x.global,{src:Object.assign(d.global.src,x.global?.src||{}),iv:Object.assign(d.global.iv,x.global?.iv||{})}),widgets:Object.assign(d.widgets,x.widgets),trip:Object.assign(d.trip,x.trip),day:Object.assign(d.day,x.day)})}}catch(e){}return structuredClone(DEF)}
 let S=load();
+if(S.global.analog){S.global.style='analog';S.global.analog=false}
 function save(){try{localStorage.setItem('gpsdash',JSON.stringify(S))}catch(e){}}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function hav(a,b,c,d){const R=6371000,r=x=>x*Math.PI/180;const dA=r(c-a),dB=r(d-b);const h=Math.sin(dA/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dB/2)**2;return 2*R*Math.asin(Math.sqrt(h))}
 
 // Zustand
 let speedKmh=0,accel=null,zeroRes=null,gForce=0,heading=null,compassDev=null,limit=null,limitSrc='',fuelList=[],wx=null,warn=null,lat=null,lon=null,lastPos=null,zeroT=null;
-let alt=null,altAcc=null,ground=null,groundPos=null;
+let gpsAcc=null,alt=null,altAcc=null,ground=null,groundPos=null;
 let fuelPos=null,wxPos=null,lastLimitPos=null,area=null,areaPos=null;
 
 WIDGETS.forEach(w=>{const d=document.createElement('div');d.className='w';d.id='w-'+w.id;d.innerHTML=`<div class="alert" id="al-${w.id}"></div><h4>${w.name}</h4><div id="b-${w.id}"></div>`;$('#app').appendChild(d)});
 
 function applyCfg(){
  WIDGETS.forEach(w=>{const c=S.widgets[w.id],el=$('#w-'+w.id);el.style.display=c.on?'':'none';el.style.color=c.color;el.style.flexBasis=(w.base*c.scale)+'px';el.style.setProperty('--s',c.scale)});
+ const sp=$('#w-speed');if(S.global.style==='cockpit'){sp.style.flexBasis='100%';sp.style.minWidth='100%'}else sp.style.minWidth='';
 }
 let wl=null;
 async function wake(){try{if(S.global.awake&&'wakeLock' in navigator){if(!wl){wl=await navigator.wakeLock.request('screen');wl.addEventListener('release',()=>wl=null)}}else if(wl){await wl.release();wl=null}}catch(e){}}
@@ -95,13 +98,14 @@ function gauge(v){
 
 function renderSpeed(){
  const v=speedKmh;
- $('#b-speed').innerHTML=S.global.analog?gauge(v):`<div class="big">${Math.round(v)}</div><div class="unit">km/h</div>`;
+ $('#b-speed').innerHTML=S.global.style==='cockpit'?cockpit(v):S.global.style==='analog'?gauge(v):`<div class="big">${Math.round(v)}</div><div class="unit">km/h</div>`;
  const over=limit!=null&&v>limit+S.global.tol;
  const al=$('#al-speed');al.style.display=over?'block':'none';if(over)al.textContent=`ÜBER DEM LIMIT +${Math.round(v-limit)} km/h`;
 }
 function renderLimit(){$('#b-limit').innerHTML=`<div class="big">${limit??'–'}</div><div class="unit">km/h</div><div class="small">${esc(roadType||(limit==null?limitSrc:''))}</div>${errHtml('limit')}`}
 function renderAccel(){$('#b-accel').innerHTML=`<div class="big">${accel==null?'–':accel.toFixed(1)}</div><div class="unit">m/s² (GPS)</div><div class="small">0–100: ${zeroRes?zeroRes.toFixed(1)+' s':'–'} · Sensor: ${gForce.toFixed(2)} g</div>`}
-function renderTrip(){$('#b-trip').innerHTML=`<div class="big">${S.trip.trip.toFixed(1)}</div><div class="unit">km Tagesstrecke</div><div class="small">Gesamt ${S.trip.total.toFixed(0)} km</div>`}
+function setHtml(el,h){if(el._h!==h){el._h=h;el.innerHTML=h}}
+function renderTrip(){setHtml($('#b-trip'),`<div class="big">${S.trip.trip.toFixed(1)}</div><div class="unit">km Tagesstrecke</div><div class="small">Gesamt ${S.trip.total.toFixed(0)} km</div><button id="rtrip2" style="margin-top:6px">Auf 0 setzen</button>`)}
 function renderDay(){
  const avg=S.day.mt>0?Math.round(S.day.dist/(S.day.mt/3600000)):0;
  $('#b-day').innerHTML=`<div class="big" style="font-size:calc(var(--s,1)*36px)">${Math.round(S.day.max)}</div><div class="unit">km/h Höchstwert</div><div class="small">Ø bewegt ${avg} km/h · ${S.day.dist.toFixed(1)} km</div>`;
@@ -170,15 +174,17 @@ function renderFuel(){
 let ab=[],abPos=null;
 async function fetchAutobahn(){
  if(!S.global.src.autobahn)return;
- const j=await ov(`[out:json][timeout:20];way(around:30000,${lat},${lon})["highway"="motorway"]["ref"];out tags 50;`);
+ const j=await ov(`[out:json][timeout:20];way(around:30000,${lat},${lon})["highway"="motorway"]["ref"];out tags 50;`,2);
  const names=(j.elements||[]).flatMap(e=>(e.tags.ref||'').split(';'));
  const refs=[...new Set(names.map(r=>r.replace(/\s+/g,'')).filter(r=>/^A\d+/.test(r)))].slice(0,4);
- const out=[];
- for(const r of refs){
-  const w=await (await fetch(`https://verkehr.autobahn.de/o/autobahn/${r}/services/warning`)).json();
-  (w.warning||[]).slice(0,5).forEach(x=>out.push({road:r,title:x.title||x.subtitle||'Meldung'}));
- }
- ab=out;
+ let fails=0;
+ const res=await Promise.all(refs.map(async r=>{
+  try{const x=await fetch(`https://verkehr.autobahn.de/o/autobahn/${r}/services/warning`);if(!x.ok)throw new Error('HTTP '+x.status);
+   const w=await x.json();return (w.warning||[]).slice(0,5).map(y=>({road:r,title:y.title||y.subtitle||'Meldung'}))}
+  catch(e){fails++;return []}
+ }));
+ if(refs.length&&fails===refs.length)throw new Error('Autobahn-API nicht erreichbar');
+ ab=res.flat();
 }
 function renderTraffic(){
  const abHtml=!S.global.src.autobahn?'<div class="small">Autobahn-Meldungen aus</div>':ab.length?`<ul class="list">${ab.slice(0,5).map(x=>`<li><span>${esc(x.road)}</span><span>${esc(x.title)}</span></li>`).join('')}</ul><div class="small">Quelle: Autobahn GmbH</div>`:errs.ab?errHtml('ab'):'<div class="small">Keine Autobahn-Meldung im Umkreis von 30 km</div>';
@@ -231,17 +237,99 @@ function stopSat(){
  if(!Gnss||!satOn)return;
  satOn=false;sats=null;Gnss.stop().catch(()=>{});renderSat();
 }
+// ===== Cockpit-Tacho nach Vorlage: 7-Segment-Ziffern, Bogen-Balken, Balkenreihen =====
+const C_G='#2bd62b',C_Y='#f2d21b',C_R='#e82a2a',C_ON='#ff2a2a',C_OFF='#3a0a0a';
+const SEG7={'0':'abcdef','1':'bc','2':'abdeg','3':'abcdg','4':'bcfg','5':'acdfg','6':'acdefg','7':'abc','8':'abcdefg','9':'abcdfg','-':'g',' ':''};
+function hexH(x1,x2,y0,t){return `${x1},${y0+t/2} ${x1+t/2},${y0} ${x2-t/2},${y0} ${x2},${y0+t/2} ${x2-t/2},${y0+t} ${x1+t/2},${y0+t}`}
+function hexV(x0,y1,y2,t){return `${x0+t/2},${y1} ${x0+t},${y1+t/2} ${x0+t},${y2-t/2} ${x0+t/2},${y2} ${x0},${y2-t/2} ${x0},${y1+t/2}`}
+function digit7(x,y,w,h,ch,dp){
+ const t=h*0.12,g=1.5,on=SEG7[ch]||'';
+ const P={a:hexH(t*0.7+g,w-t*0.7-g,0,t),g:hexH(t*0.7+g,w-t*0.7-g,h/2-t/2,t),d:hexH(t*0.7+g,w-t*0.7-g,h-t,t),
+  f:hexV(0,t*0.5+g,h/2-g,t),b:hexV(w-t,t*0.5+g,h/2-g,t),e:hexV(0,h/2+g,h-t*0.5-g,t),c:hexV(w-t,h/2+g,h-t*0.5-g,t)};
+ let s=`<g transform="translate(${x} ${y}) skewX(-6)">`;
+ for(const k in P)s+=`<polygon points="${P[k]}" fill="${on.includes(k)?C_ON:C_OFF}"/>`;
+ if(dp!==undefined)s+=`<circle cx="${w+t*0.9}" cy="${h-t*0.3}" r="${t*0.5}" fill="${dp?C_ON:C_OFF}"/>`;
+ return s+'</g>';
+}
+function digits7(x,y,w,h,gap,str,dpIdx){let s='';for(let i=0;i<str.length;i++)s+=digit7(x+i*(w+gap),y,w,h,str[i],dpIdx==null?undefined:i===dpIdx);return s}
+// Bogen: quadratische Kurve, 36 Segmente gleichmäßig nach Bogenlänge, Skala 0–250 km/h
+const ARC=(()=>{
+ const P0=[38,222],P1=[380,-40],P2=[668,128],N=36;
+ const pt=t=>[(1-t)*(1-t)*P0[0]+2*(1-t)*t*P1[0]+t*t*P2[0],(1-t)*(1-t)*P0[1]+2*(1-t)*t*P1[1]+t*t*P2[1]];
+ const tab=[0];let prev=pt(0),len=0;
+ for(let i=1;i<=400;i++){const q=pt(i/400);len+=Math.hypot(q[0]-prev[0],q[1]-prev[1]);tab.push(len);prev=q}
+ const at=f=>{const target=f*len;let i=1;while(i<400&&tab[i]<target)i++;const a=tab[i-1],b=tab[i];const t=((i-1)+(b>a?(target-a)/(b-a):0))/400;
+  const p=pt(t),q=pt(Math.min(1,t+0.002)),r=pt(Math.max(0,t-0.002));return{x:p[0],y:p[1],ang:Math.atan2(q[1]-r[1],q[0]-r[0])*180/Math.PI}};
+ const segs=[];for(let i=0;i<N;i++)segs.push(at((i+0.5)/N));
+ const labels=[0,50,100,150,200,250].map(v=>{const p=at(v/250),a=p.ang*Math.PI/180;return{v,x:p.x-Math.sin(a)*38,y:p.y+Math.cos(a)*38+5}});
+ return{segs,labels,sw:len/N*0.78};
+})();
+const dv={};
+function ease(k,t){if(dv[k]==null)dv[k]=t;dv[k]+=(t-dv[k])*0.35;return dv[k]}
+const clamp01=x=>Math.max(0,Math.min(1,x));
+const r1=x=>(Math.round(x*10)/10).toFixed(1);
+function zoneCol(i,n,inv){const p=n>1?i/(n-1):0,q=inv?1-p:p;return q<0.6?C_G:q<0.85?C_Y:C_R}
+function lampSvg(x,y,w,on){return `<rect x="${x}" y="${y}" width="${w}" height="22" fill="${on?'#ffd400':'#5c4d00'}"/>`}
+function barRow(x,y,w,n,val,label,inv,on,fs){
+ const lit=Math.round(clamp01(val)*n),gap=3,sw=(w-(n-1)*gap)/n;
+ let s=lampSvg(x,y,40,on)+`<text x="${x+w}" y="${y+20}" text-anchor="end" fill="#fff" font-size="${fs||17}" font-weight="700">${esc(label)}</text>`;
+ for(let i=0;i<n;i++)s+=`<rect x="${(x+i*(sw+gap)).toFixed(1)}" y="${y+34}" width="${sw.toFixed(1)}" height="24" fill="${zoneCol(i,n,inv)}" opacity="${i<lit?1:0.16}"/>`;
+ return s;
+}
+function vbar(x,y,w,h,val,label,color,txt,on){
+ const f=clamp01(val)*h;
+ return lampSvg(x,y-93,w,on)+`<text x="${x+w/2}" y="${y-30}" text-anchor="middle" fill="#fff" font-size="15" font-weight="700">${esc(label)}</text><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${color}" opacity="0.16"/><rect x="${x}" y="${(y+h-f).toFixed(1)}" width="${w}" height="${f.toFixed(1)}" fill="${color}"/><text x="${x+w/2}" y="${y+h+22}" text-anchor="middle" fill="#fff" font-size="14">${esc(txt)}</text>`;
+}
+function cockpit(v){
+ const lim=limit,over=lim!=null&&v>lim+S.global.tol,ev=ease('v',v);
+ let s=`<svg viewBox="0 0 1220 556" style="width:100%;height:auto;background:#000;border-radius:10px;font-family:Arial,system-ui,sans-serif">`;
+ ARC.segs.forEach((g,i)=>{const vv=(i+0.5)*250/36,col=vv<130?C_G:vv<180?C_Y:C_R;
+  s+=`<rect x="${-ARC.sw/2}" y="-16" width="${ARC.sw}" height="32" rx="1.5" transform="translate(${g.x.toFixed(1)} ${g.y.toFixed(1)}) rotate(${g.ang.toFixed(1)})" fill="${col}" opacity="${ev>i*250/36?1:0.16}"/>`});
+ ARC.labels.forEach(l=>{s+=`<text x="${l.x.toFixed(1)}" y="${l.y.toFixed(1)}" text-anchor="middle" fill="#fff" font-size="15" font-weight="700">${l.v}</text>`});
+ s+=lampSvg(48,52,40,over);
+ // große Anzeige: km/h ganzzahlig
+ s+=`<rect x="318" y="122" width="225" height="136" fill="#1c1c1c"/>`+digits7(332,140,58,96,14,String(Math.min(999,Math.round(v))).padStart(3,'0'));
+ s+=`<rect x="545" y="227" width="77" height="43" fill="#e22"/><text x="583" y="256" text-anchor="middle" fill="#fff" font-size="21" font-weight="700">KM/H</text>`;
+ // kleine Anzeige: km/h in 0,1er-Schritten
+ s+=`<rect x="990" y="54" width="160" height="66" rx="3" fill="#150505"/>`+digits7(1003,66,28,42,10,String(Math.min(9999,Math.round(v*10))).padStart(4,'0'),2);
+ const t=wx?wx.cur.temperature_2m:null,gu=wx?wx.cur.wind_gusts_10m:null,rp=wx?wx.pp[0]:null;
+ const acc=accel||0,pos=Math.max(0,acc),neg=Math.max(0,-acc);
+ const nhn=(alt!=null&&lat!=null)?alt-geoid(lat,lon):null;
+ const used=sats?sats.sats.filter(x=>x.used).length:null;
+ const gpsVal=used!=null?used/20:(gpsAcc!=null?1-gpsAcc/60:0);
+ const gpsTxt=used!=null?`${used} SAT`:(gpsAcc!=null?`±${Math.round(gpsAcc)} m`:'–');
+ const avg=S.day.mt>0?S.day.dist/(S.day.mt/3600000):0;
+ s+=barRow(38,284,282,7,ease('t',t==null?0:(t+10)/50),`TEMP °C  ${t==null?'–':Math.round(t)}`,false,t!=null&&(t>=32||t<=0));
+ s+=barRow(38,364,282,7,ease('w',gu==null?0:gu/120),`BÖEN km/h  ${gu==null?'–':Math.round(gu)}`,false,gu!=null&&gu>=60);
+ s+=barRow(38,444,282,7,ease('r',rp==null?0:rp/100),`REGEN %  ${rp==null?'–':Math.round(rp)}`,false,rp!=null&&rp>=70);
+ s+=barRow(362,284,282,7,ease('l',lim?v/(lim*1.3):0),`TEMPO / LIMIT  ${Math.round(v)} / ${lim??'–'}`,false,over);
+ s+=barRow(362,364,282,7,ease('a',Math.abs(acc)/6),`BESCHL. m/s²  ${r1(acc)}`,false,Math.abs(acc)>=3);
+ s+=barRow(362,444,282,7,ease('g',gpsVal),`GPS-SIGNAL  ${gpsTxt}`,true,gpsVal<0.3);
+ s+=barRow(727,52,201,5,ease('dm',S.day.max/250),`MAX km/h  ${Math.round(S.day.max)}`,false,false,14);
+ s+=barRow(727,123,201,5,ease('da',avg/250),`Ø km/h  ${Math.round(avg)}`,false,false,14);
+ s+=barRow(727,194,201,5,ease('dd',S.day.dist/300),`STRECKE km  ${S.day.dist.toFixed(1)}`,false,false,14);
+ s+=`<text x="1068" y="152" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">STATUS</text>`;
+ [['TEMPO',over],['DWD',(warn||[]).length>0],['HITZE',(heat||[]).length>0],['STAU',ab.length>0]].forEach((c,i)=>{
+  const x=958+i*51.5;
+  s+=`<text x="${x+21}" y="178" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">${c[0]}</text><rect x="${x}" y="190" width="42" height="22" fill="${C_G}" opacity="${c[1]?0.16:1}"/><rect x="${x}" y="214" width="42" height="22" fill="${C_R}" opacity="${c[1]?1:0.16}"/>`});
+ s+=vbar(738,365,40,135,ease('vb',pos/4),'BESCHL.',C_G,r1(pos),pos>=3);
+ s+=vbar(869,365,40,135,ease('vn',neg/8),'BREMSE',C_R,r1(neg),neg>=4);
+ s+=vbar(1000,365,40,135,ease('vg',gForce),'G-KRAFT',C_Y,gForce.toFixed(2),gForce>=0.6);
+ s+=vbar(1131,365,40,135,ease('vh',nhn==null?0:nhn/500),'HÖHE',   '#35b6ff',nhn==null?'–':Math.round(nhn)+' m',false);
+ return s+'</svg>';
+}
+
 function renderAll(){renderSpeed();renderLimit();renderAccel();renderTrip();renderDay();renderCompass();renderWeather();renderWarn();renderHeat();renderSat();renderFuel();renderTraffic();renderCustom()}
 
 // Abrufe (nur mit Schalter an, im Intervall)
-// Overpass: Anfragen nacheinander (Server erlaubt nur wenige gleichzeitig), bei Fehler Ersatzserver
+// Overpass: drei Spuren (je ein Server zuerst), damit Tempolimit, Tankstellen und Autobahn gleichzeitig laufen; bei Fehler Ersatzserver
 const OV=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.private.coffee/api/interpreter'];
-let ovQ=Promise.resolve();
-function ov(q){const p=ovQ.then(()=>ovTry(q));ovQ=p.catch(()=>{});return p}
-async function ovTry(q){
+const ovLane=[Promise.resolve(),Promise.resolve(),Promise.resolve()];
+function ov(q,lane=0){const p=ovLane[lane].then(()=>ovTry(q,lane));ovLane[lane]=p.catch(()=>{});return p}
+async function ovTry(q,start){
  let last='';
- for(const u of OV){
-  const h=new URL(u).host;
+ for(let k=0;k<OV.length;k++){
+  const u=OV[(start+k)%OV.length],h=new URL(u).host;
   try{const r=await fetch(u+'?data='+encodeURIComponent(q));if(r.ok)return await r.json();last=h+' HTTP '+r.status}
   catch(e){last=h+' '+(e&&e.message||e)}
  }
@@ -286,7 +374,7 @@ async function fetchLimit(){
 async function fetchCountry(){const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=3&lat=${lat}&lon=${lon}`,{headers:{'Accept-Language':'de'}});const j=await r.json();country=(j.address?.country_code||'').toUpperCase()||null}
 async function fetchFuel(){
  const km=Math.min(100,Math.max(1,+S.global.fuelKm||5));
- const j=await ov(`[out:json][timeout:30];node(around:${km*1000},${lat},${lon})["amenity"="fuel"];out body 60;`);
+ const j=await ov(`[out:json][timeout:30];node(around:${km*1000},${lat},${lon})["amenity"="fuel"];out body 60;`,1);
  fuelList=(j.elements||[]).map(e=>({name:e.tags.brand||e.tags.name||'Tankstelle',la:e.lat,lo:e.lon,d:hav(lat,lon,e.lat,e.lon)/1000})).sort((a,b)=>a.d-b.d).slice(0,6);
 }
 async function fetchWeather(){
@@ -323,7 +411,14 @@ async function fetchDwd(){
 function due(key,minutes){const last=S.last[key]||0;return Date.now()-last>minutes*60000}
 function mark(key){S.last[key]=Date.now();save()}
 // Fehler je Quelle; bei Fehler neuer Versuch nach 2 Minuten, auch ohne Bewegung
-const errs={};
+const errs={},fz={};
+// Erster Abruf sofort; nach Fehlversuch nach Intervall; sonst bei Bewegung (weit weg: sofort)
+function need(key,iv,pos,far,near){
+ if(!fz[key])return true;
+ if(!pos)return due(key,iv);
+ const d=hav(pos.lat,pos.lon,lat,lon);
+ return d>far||(due(key,iv)&&d>near);
+}
 function run(key,iv,fn,onFail){
  mark(key);
  return fn().then(()=>{delete errs[key];renderAll()}).catch(e=>{
@@ -340,11 +435,11 @@ function maybeFetch(){
  if(lastLimitPos==null||hav(lastLimitPos.lat,lastLimitPos.lon,lat,lon)>300){lastLimitPos={lat,lon};fetchLimit().then(renderAll).catch(e=>{errs.limit=String(e&&e.message||e).slice(0,80);renderAll();setTimeout(()=>{lastLimitPos=null},60000)})}
  if(!groundPos||hav(groundPos.lat,groundPos.lon,lat,lon)>300){groundPos={lat,lon};fetchGround().then(renderCompass).catch(()=>{setTimeout(()=>{groundPos=null},120000)})}
  const iv=S.global.iv;
- if(S.global.src.fuel&&due('fuel',iv.fuel)&&(!fuelPos||hav(fuelPos.lat,fuelPos.lon,lat,lon)>1000)){fuelPos={lat,lon};run('fuel',iv.fuel,fetchFuel,()=>{fuelPos=null})}
- if(S.global.src.weather&&due('wx',iv.weather)&&(!wxPos||hav(wxPos.lat,wxPos.lon,lat,lon)>5000)){wxPos={lat,lon};run('wx',iv.weather,fetchWeather,()=>{wxPos=null})}
+ if(S.global.src.fuel&&need('fuel',iv.fuel,fuelPos,20000,1000)){fz.fuel=true;fuelPos={lat,lon};run('fuel',iv.fuel,fetchFuel,()=>{fuelPos=null})}
+ if(S.global.src.weather&&need('wx',iv.weather,wxPos,50000,5000)){fz.wx=true;wxPos={lat,lon};run('wx',iv.weather,fetchWeather,()=>{wxPos=null})}
  if(S.global.src.dwd&&area&&due('dwd',iv.dwd))run('dwd',iv.dwd,fetchDwd);
  if(S.global.src.heat&&area&&due('heat',iv.dwd))run('heat',iv.dwd,fetchHeat);
- if(S.global.src.autobahn&&due('ab',iv.dwd)&&(!abPos||hav(abPos.lat,abPos.lon,lat,lon)>5000)){abPos={lat,lon};run('ab',iv.dwd,fetchAutobahn,()=>{abPos=null})}
+ if(S.global.src.autobahn&&need('ab',iv.dwd,abPos,20000,5000)){fz.ab=true;abPos={lat,lon};run('ab',iv.dwd,fetchAutobahn,()=>{abPos=null})}
 }
 
 function onPos(p){
@@ -367,10 +462,13 @@ function onPos(p){
  if(acc!=null)accel=acc;
  lastPos={lat,lon,t,v};speedKmh=v;
  if(c.heading!=null&&!isNaN(c.heading)){heading=c.heading;headT=Date.now()}
+ gpsAcc=c.accuracy;S.lp={lat,lon};
  if(c.altitude!=null&&!isNaN(c.altitude)){alt=c.altitude;altAcc=c.altitudeAccuracy}
  save();renderAll();maybeFetch();
 }
 function onErr(){$('#b-speed').innerHTML='<div class="small">GPS nicht verfügbar – Standortzugriff erlauben</div>'}
+if(S.lp&&lat==null){lat=S.lp.lat;lon=S.lp.lon;setTimeout(maybeFetch,0)}
+if(navigator.geolocation)navigator.geolocation.getCurrentPosition(p=>{if(!lastPos&&(lat==null||hav(lat,lon,p.coords.latitude,p.coords.longitude)>2000)){lat=p.coords.latitude;lon=p.coords.longitude;maybeFetch();renderAll()}},()=>{},{enableHighAccuracy:false,maximumAge:600000,timeout:10000});
 if(navigator.geolocation)navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:0});
 else onErr();
 window.addEventListener('devicemotion',e=>{const a=e.acceleration;if(a)gForce=Math.hypot(a.x||0,a.y||0,a.z||0)/9.81});
@@ -401,7 +499,7 @@ function buildPanel(){
  <div class="row"><label>GPS-Satelliten (nur APK)</label><input type="checkbox" data-src="sat" ${s.sat?'checked':''}></div>
  <div class="row"><label>Tempolimit (OSM)</label><input type="checkbox" data-src="limit" ${s.limit?'checked':''}></div>
  <h3>Allgemein</h3>
- <div class="row"><label>Analoger Tacho</label><input type="checkbox" data-g="analog" ${S.global.analog?'checked':''}></div>
+ <div class="row"><label>Tacho-Stil</label><select data-g="style"><option value="digital" ${S.global.style==='digital'?'selected':''}>Digital</option><option value="analog" ${S.global.style==='analog'?'selected':''}>Analog</option><option value="cockpit" ${S.global.style==='cockpit'?'selected':''}>Cockpit (Querformat)</option></select></div>
  <div class="row"><label>Bildschirm anlassen</label><input type="checkbox" data-g="awake" ${S.global.awake?'checked':''}></div>
  <div class="row"><label>Drehung sperren</label><select data-g="orient"><option value="off" ${S.global.orient==='off'?'selected':''}>aus</option><option value="portrait" ${S.global.orient==='portrait'?'selected':''}>Hochformat</option><option value="landscape" ${S.global.orient==='landscape'?'selected':''}>Querformat</option></select></div>
  <div class="row"><label>Toleranz km/h</label><input type="number" min="0" max="30" data-g="tol" value="${S.global.tol}" style="width:70px"></div>
@@ -460,8 +558,10 @@ fuelBox.addEventListener('pointerdown',e=>{
 fuelBox.addEventListener('pointermove',e=>{if(navT&&navStart&&Math.hypot(e.clientX-navStart.x,e.clientY-navStart.y)>12){clearTimeout(navT);navT=null}});
 ['pointerup','pointercancel','pointerleave'].forEach(t=>fuelBox.addEventListener(t,()=>{clearTimeout(navT);navT=null}));
 
+$('#b-trip').addEventListener('click',e=>{if(e.target.id==='rtrip2'&&confirm('Tageskilometer auf 0 setzen?')){S.trip.trip=0;save();renderTrip()}});
 applyCfg();renderAll();wake();applyOrient();startSat();
 setInterval(renderCustom,1000);
+setInterval(()=>{if(S.global.style==='cockpit')renderSpeed()},250);
 </script>
 </body>
 </html>
