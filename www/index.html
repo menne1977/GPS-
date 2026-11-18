@@ -18,6 +18,11 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font-family
 .analog{width:100%;max-width:230px}
 ul.list{list-style:none;padding:0;margin:0;font-size:13px;width:100%}
 ul.list li{display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid #223040;padding:4px 0}
+li.nav{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:manipulation}
+#navsheet{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:flex-end;justify-content:center;z-index:12}
+#navsheet.open{display:flex}
+#navbox{background:var(--card);width:min(420px,100%);border-radius:16px 16px 0 0;padding:14px;display:flex;flex-direction:column;gap:8px}
+#navbox button{padding:14px;font-size:16px}
 #open{position:fixed;top:6px;right:6px;z-index:5;background:#22303f;color:var(--txt);border:0;border-radius:8px;padding:6px 10px;font-size:18px}
 #menu{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;justify-content:flex-end;z-index:9}
 #menu.open{display:flex}
@@ -32,6 +37,7 @@ input,select,textarea{background:#0b0f14;color:#fff;border:0;border-radius:8px;p
 <body>
 <button id="open" aria-label="Menü">☰</button>
 <div id="app"></div>
+<div id="navsheet"><div id="navbox"></div></div>
 <div id="menu"><div id="panel"></div></div>
 <script>
 const $=s=>document.querySelector(s);
@@ -153,9 +159,12 @@ function renderWarn(){
  al.style.display=list.length?'block':'none';if(list.length)al.textContent='AMTLICHE WARNUNG';
  $('#b-warn').innerHTML=list.length?`<ul class="list">${list.slice(0,4).map(w=>`<li><span>${esc(w.event)}</span><span>${esc(w.level)}</span></li>`).join('')}</ul><div class="small">${esc(area.kreis||area.ort)}</div>`:`<div class="small">Keine aktiven Warnungen für ${esc(area.kreis||area.ort)}</div><div class="small">Quelle: DWD</div>`+errHtml('dwd');
 }
+// Nur neu zeichnen, wenn sich der Inhalt ändert (sonst bricht langes Drücken bei jedem GPS-Update ab)
+let fuelHtml='';
+function setFuel(h){if(h===fuelHtml)return;fuelHtml=h;$('#b-fuel').innerHTML=h}
 function renderFuel(){
- if(!S.global.src.fuel){$('#b-fuel').innerHTML='<div class="small">Tankstellen aus (Schalter)</div>';return}
- $('#b-fuel').innerHTML=fuelList.length?`<ul class="list">${fuelList.map(f=>`<li><span>${esc(f.name)}</span><span>${f.d.toFixed(1)} km</span></li>`).join('')}</ul><div class="small">Preise nicht enthalten · Umkreis ${S.global.fuelKm} km</div>`:errs.fuel?errHtml('fuel'):`<div class="small">Keine Tankstelle im Umkreis von ${S.global.fuelKm} km</div>`;
+ if(!S.global.src.fuel){setFuel('<div class="small">Tankstellen aus (Schalter)</div>');return}
+ setFuel(fuelList.length?`<ul class="list">${fuelList.map((f,i)=>`<li class="nav" data-i="${i}"><span>${esc(f.name)}</span><span>${f.d.toFixed(1)} km</span></li>`).join('')}</ul><div class="small">Preise nicht enthalten · Umkreis ${S.global.fuelKm} km · gedrückt halten = navigieren</div>`:errs.fuel?errHtml('fuel'):`<div class="small">Keine Tankstelle im Umkreis von ${S.global.fuelKm} km</div>`);
 }
 // Autobahn-Meldungen: Autobahnen im Umkreis von 30 km (OSM), dann je Autobahn die Meldungen der Autobahn-API
 let ab=[],abPos=null;
@@ -278,7 +287,7 @@ async function fetchCountry(){const r=await fetch(`https://nominatim.openstreetm
 async function fetchFuel(){
  const km=Math.min(100,Math.max(1,+S.global.fuelKm||5));
  const j=await ov(`[out:json][timeout:30];node(around:${km*1000},${lat},${lon})["amenity"="fuel"];out body 60;`);
- fuelList=(j.elements||[]).map(e=>({name:e.tags.brand||e.tags.name||'Tankstelle',d:hav(lat,lon,e.lat,e.lon)/1000})).sort((a,b)=>a.d-b.d).slice(0,6);
+ fuelList=(j.elements||[]).map(e=>({name:e.tags.brand||e.tags.name||'Tankstelle',la:e.lat,lo:e.lon,d:hav(lat,lon,e.lat,e.lon)/1000})).sort((a,b)=>a.d-b.d).slice(0,6);
 }
 async function fetchWeather(){
  const u=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code,wind_gusts_10m&hourly=precipitation_probability&timezone=auto&forecast_days=2`;
@@ -425,6 +434,31 @@ $('#panel').addEventListener('click',async e=>{const id=e.target.id;
  if(id==='sens'){try{if(window.DeviceMotionEvent?.requestPermission)await DeviceMotionEvent.requestPermission();if(window.DeviceOrientationEvent?.requestPermission)await DeviceOrientationEvent.requestPermission()}catch(_){}}
  if(id==='reset'&&confirm('Alle Einstellungen und Strecken löschen?')){try{localStorage.removeItem('gpsdash')}catch(_){}location.reload()}
 });
+
+// Navigation: Tankstelle gedrückt halten -> Google Maps / Sygic / andere Karten-App
+let navT=null,navStart=null;
+function openNav(i){
+ const f=fuelList[i];if(!f)return;
+ const n=encodeURIComponent(f.name);
+ const L={
+  google:`google.navigation:q=${f.la},${f.lo}&mode=d`,
+  sygic:`com.sygic.aura://coordinate|${f.lo}|${f.la}|drive`,
+  geo:`geo:${f.la},${f.lo}?q=${f.la},${f.lo}(${n})`,
+  web:`https://www.google.com/maps/dir/?api=1&destination=${f.la},${f.lo}&travelmode=driving`};
+ $('#navbox').innerHTML=`<b>${esc(f.name)} · ${f.d.toFixed(1)} km</b><button data-go="google">Google Maps</button><button data-go="sygic">Sygic</button><button data-go="geo">Andere Karten-App</button><button data-go="web">Im Browser öffnen</button><button data-go="x">Abbrechen</button>`;
+ $('#navbox').onclick=e=>{const g=e.target.dataset.go;if(!g)return;$('#navsheet').classList.remove('open');if(g==='x')return;location.href=L[g]};
+ $('#navsheet').classList.add('open');
+}
+$('#navsheet').addEventListener('click',e=>{if(e.target.id==='navsheet')e.target.classList.remove('open')});
+const fuelBox=$('#b-fuel');
+fuelBox.addEventListener('contextmenu',e=>{if(e.target.closest('li.nav'))e.preventDefault()});
+fuelBox.addEventListener('pointerdown',e=>{
+ const li=e.target.closest('li.nav');if(!li)return;
+ navStart={x:e.clientX,y:e.clientY};clearTimeout(navT);
+ navT=setTimeout(()=>{navT=null;if(navigator.vibrate)navigator.vibrate(30);openNav(+li.dataset.i)},600);
+});
+fuelBox.addEventListener('pointermove',e=>{if(navT&&navStart&&Math.hypot(e.clientX-navStart.x,e.clientY-navStart.y)>12){clearTimeout(navT);navT=null}});
+['pointerup','pointercancel','pointerleave'].forEach(t=>fuelBox.addEventListener(t,()=>{clearTimeout(navT);navT=null}));
 
 applyCfg();renderAll();wake();applyOrient();startSat();
 setInterval(renderCustom,1000);
