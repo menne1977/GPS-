@@ -5,9 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
-import android.media.AudioFormat;
 import android.media.AudioManager;
-import android.media.AudioTrack;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -29,17 +27,13 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
 /**
  * Sprachassistent: Mikrofon (Android-Spracherkennung, Deutsch) und Sprachausgabe (Android-TTS)
- * mit optionalem Roboter-Effekt. Vor jeder Ausgabe wird die Erkennung komplett beendet und Audiofokus
+ * auf dem Medien-Kanal mit einstellbarer Lautstärke. Vor jeder Ausgabe wird die Erkennung komplett beendet und Audiofokus
  * geholt; danach wird sie neu aufgebaut. Jede Ausgabe hat eine eigene Nummer, damit späte Rückmeldungen
  * älterer Ausgaben nichts durcheinanderbringen.
  * Ereignisse: "speech" {text, alts}, "state" {listening, speaking, error}, "spoke" {via}.
@@ -62,8 +56,7 @@ public class VoicePlugin extends Plugin {
     private AudioFocusRequest focusReq;
 
     private String pText = "", pVoice = "";
-    private float pPitch = 0.7f, pRate = 0.95f;
-    private boolean pFx = true;
+    private float pPitch = 0.85f, pRate = 0.95f, pVolume = 80f;
 
     private AudioManager am() {
         if (am == null) am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
@@ -217,15 +210,14 @@ public class VoicePlugin extends Plugin {
         notifyListeners("spoke", o);
     }
 
-    // ---------- Audiofokus ----------
+    // ---------- Audiofokus + Lautstärke ----------
+    private int savedVol = -1;
+
     private void takeFocus() {
         try {
             if (Build.VERSION.SDK_INT >= 26) {
                 focusReq = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
-                        .setAudioAttributes(new AudioAttributes.Builder()
-                                .setUsage(AudioAttributes.USAGE_ASSISTANT)
-                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-                        .build();
+                        .setAudioAttributes(attrs()).build();
                 am().requestAudioFocus(focusReq);
             } else {
                 am().requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK);
@@ -240,7 +232,38 @@ public class VoicePlugin extends Plugin {
         } catch (Exception ignored) { }
     }
 
+    // Medienlautstärke während der Ansage auf den eingestellten Wert setzen, danach zurück
+    private void raiseVolume() {
+        if (pVolume <= 0) return;
+        try {
+            int max = am().getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+            int cur = am().getStreamVolume(AudioManager.STREAM_MUSIC);
+            int want = Math.max(1, Math.round(max * pVolume / 100f));
+            if (want != cur) {
+                if (savedVol < 0) savedVol = cur;
+                am().setStreamVolume(AudioManager.STREAM_MUSIC, want, 0);
+            }
+        } catch (Exception e) {
+            emitState("Lautstärke nicht änderbar (Nicht-stören aktiv?)");
+        }
+    }
+
+    private void restoreVolume() {
+        if (savedVol < 0) return;
+        try { am().setStreamVolume(AudioManager.STREAM_MUSIC, savedVol, 0); } catch (Exception ignored) { }
+        savedVol = -1;
+    }
+
+    private static AudioAttributes attrs() {
+        // Medien-Kanal: folgt der normalen Medienlautstärke
+        return new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build();
+    }
+
     // ---------- Sprachausgabe ----------
+    private String langStatus = "unbekannt";
+
     private void ensureTts(Runnable r) {
         main.post(() -> {
             if (ttsReady && tts != null) { r.run(); return; }
@@ -250,34 +273,21 @@ public class VoicePlugin extends Plugin {
                 if (status != TextToSpeech.SUCCESS) {
                     waiting.clear();
                     tts = null;
+                    langStatus = "kein Sprachdienst";
                     emitState("Sprachausgabe nicht verfügbar: kein Text-zu-Sprache-Dienst aktiv (Android-Einstellungen > Text-zu-Sprache)");
                     return;
                 }
                 int lr = tts.setLanguage(Locale.GERMANY);
+                langStatus = (lr == TextToSpeech.LANG_MISSING_DATA) ? "Deutsch: Sprachdaten fehlen"
+                        : (lr == TextToSpeech.LANG_NOT_SUPPORTED) ? "Deutsch nicht unterstützt" : "Deutsch OK";
                 if (lr == TextToSpeech.LANG_MISSING_DATA || lr == TextToSpeech.LANG_NOT_SUPPORTED) {
                     emitState("Deutsche Sprachausgabe fehlt: Android-Einstellungen > Text-zu-Sprache > Sprachdaten installieren");
                 }
-                tts.setAudioAttributes(new AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ASSISTANT)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
+                tts.setAudioAttributes(attrs());
                 tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
-                    @Override public void onStart(String id) {
-                        if (id.startsWith("plain:") && isCurrent(id)) emitSpoke("normal");
-                    }
-                    @Override public void onDone(String id) {
-                        if (!isCurrent(id)) return;
-                        if (id.startsWith("fx:")) {
-                            final int tk = token;
-                            new Thread(() -> playFx(tk)).start();
-                        } else {
-                            speechFinished(token);
-                        }
-                    }
-                    @Override public void onError(String id) {
-                        if (!isCurrent(id)) return;
-                        if (id.startsWith("fx:")) main.post(() -> speakPlain(token));
-                        else speechFinished(token);
-                    }
+                    @Override public void onStart(String id) { if (isCurrent(id)) emitSpoke("ok"); }
+                    @Override public void onDone(String id) { if (isCurrent(id)) speechFinished(token); }
+                    @Override public void onError(String id) { if (isCurrent(id)) speechFinished(token); }
                     @Override public void onError(String id, int code) {
                         if (isCurrent(id)) emitState("Sprachausgabe-Fehler " + code);
                         onError(id);
@@ -299,10 +309,10 @@ public class VoicePlugin extends Plugin {
     @PluginMethod
     public void speak(PluginCall call) {
         pText = call.getString("text", "");
-        pPitch = call.getFloat("pitch", 0.7f);
+        pPitch = call.getFloat("pitch", 0.85f);
         pRate = call.getFloat("rate", 0.95f);
         pVoice = call.getString("voice", "");
-        pFx = call.getBoolean("fx", true);
+        pVolume = call.getFloat("volume", 80f);
         ensureTts(this::sayPending);
         call.resolve();
     }
@@ -317,6 +327,7 @@ public class VoicePlugin extends Plugin {
                         JSObject o = new JSObject();
                         o.put("name", v.getName());
                         o.put("network", v.isNetworkConnectionRequired());
+                        o.put("installed", !v.getFeatures().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED));
                         arr.put(o);
                     }
                 }
@@ -325,6 +336,32 @@ public class VoicePlugin extends Plugin {
             out.put("voices", arr);
             call.resolve(out);
         });
+    }
+
+    // Stimme prüfen: Dienst, Sprache, aktive Stimme, Medienlautstärke
+    @PluginMethod
+    public void check(PluginCall call) {
+        ensureTts(() -> {
+            JSObject o = new JSObject();
+            try { o.put("engine", tts.getDefaultEngine()); } catch (Exception e) { o.put("engine", "?"); }
+            o.put("language", langStatus);
+            try { Voice v = tts.getVoice(); o.put("voice", v != null ? v.getName() : "Standard"); } catch (Exception e) { o.put("voice", "?"); }
+            int max = am().getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+            int cur = am().getStreamVolume(AudioManager.STREAM_MUSIC);
+            o.put("media", Math.round(cur * 100f / Math.max(1, max)));
+            call.resolve(o);
+        });
+        // falls kein Dienst startet, trotzdem antworten
+        main.postDelayed(() -> {
+            if (!ttsReady) {
+                JSObject o = new JSObject();
+                o.put("engine", "keiner");
+                o.put("language", langStatus);
+                o.put("voice", "-");
+                o.put("media", -1);
+                try { call.resolve(o); } catch (Exception ignored) { }
+            }
+        }, 4000);
     }
 
     private void applyVoice() {
@@ -344,123 +381,39 @@ public class VoicePlugin extends Plugin {
         if (pText == null || pText.isEmpty() || tts == null) return;
         final int tk = ++token;
         speaking = true;
-        killRec();                 // Erkennung komplett beenden (nicht nur pausieren)
-        tts.stop();                // laufende Ausgabe abbrechen
+        killRec();                 // Erkennung komplett beenden
+        tts.stop();
         emitState(null);
         takeFocus();
+        raiseVolume();
         applyVoice();
-        // Sicherheitsnetz: nach spätestens dieser Zeit wieder zuhören
         main.postDelayed(() -> { if (speaking && token == tk) speechFinished(tk); }, 9000 + pText.length() * 120L);
-        if (pFx) {
-            File f = new File(getContext().getCacheDir(), "kitt_" + tk + ".wav");
-            int r = tts.synthesizeToFile(pText, new Bundle(), f, "fx:" + tk);
-            if (r != TextToSpeech.SUCCESS) { speakPlain(tk); return; }
-            // kommt die Effekt-Datei nicht rechtzeitig, normal sprechen
-            main.postDelayed(() -> { if (speaking && token == tk && !fxPlaying) speakPlain(tk); }, 5000);
-        } else {
-            speakPlain(tk);
+        Bundle b = new Bundle();
+        b.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f);
+        b.putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC);
+        int r = tts.speak(pText, TextToSpeech.QUEUE_FLUSH, b, "say:" + tk);
+        if (r != TextToSpeech.SUCCESS) {
+            emitState("Sprachausgabe konnte nicht starten");
+            speechFinished(tk);
         }
-    }
-
-    private volatile boolean fxPlaying = false;
-
-    private void speakPlain(int tk) {
-        if (tts == null || token != tk) return;
-        fxPlaying = true; // verhindert doppelte Ausgabe
-        tts.speak(pText, TextToSpeech.QUEUE_FLUSH, null, "plain:" + tk);
     }
 
     private void speechFinished(int tk) {
         main.post(() -> {
             if (token != tk || !speaking) return;
             speaking = false;
-            fxPlaying = false;
+            restoreVolume();
             dropFocus();
             emitState(null);
-            if (wantListen) again(700, true); // Erkennung frisch aufbauen
+            if (wantListen) again(700, true);
         });
-    }
-
-    // ---------- Roboter-Effekt ----------
-    private static int le16(byte[] b, int o) { return (b[o] & 0xff) | ((b[o + 1] & 0xff) << 8); }
-    private static int le32(byte[] b, int o) { return le16(b, o) | (le16(b, o + 2) << 16); }
-
-    private void playFx(int tk) {
-        File f = new File(getContext().getCacheDir(), "kitt_" + tk + ".wav");
-        AudioTrack t = null;
-        try {
-            if (token != tk) return;
-            fxPlaying = true;
-            byte[] b = new byte[(int) f.length()];
-            try (FileInputStream in = new FileInputStream(f)) {
-                int off = 0, n;
-                while (off < b.length && (n = in.read(b, off, b.length - off)) > 0) off += n;
-            }
-            int ch = le16(b, 22), rate = le32(b, 24), bits = le16(b, 34);
-            int data = -1;
-            for (int i = 12; i + 8 < b.length; i++) {
-                if (b[i] == 'd' && b[i + 1] == 'a' && b[i + 2] == 't' && b[i + 3] == 'a') { data = i + 8; break; }
-            }
-            if (data < 0 || bits != 16 || ch < 1 || ch > 2 || rate < 8000) throw new Exception("WAV-Format");
-            int n = (b.length - data) / 2;
-            short[] s = new short[n];
-            ByteBuffer.wrap(b, data, n * 2).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(s);
-
-            float[] y = new float[n];
-            double w = 2 * Math.PI * 45.0 / rate;
-            float mix = 0.35f, peak = 0.0001f;
-            int dd = Math.max(1, (int) (rate * 0.006)) * ch;
-            for (int k = 0; k < n; k++) {
-                float x = s[k] / 32768f;
-                float v = x * (1 - mix) + x * (float) Math.sin(w * (k / ch)) * mix;
-                if (k >= dd) v += 0.3f * y[k - dd];
-                y[k] = v;
-                float a = Math.abs(v);
-                if (a > peak) peak = a;
-            }
-            float g = 0.9f / Math.max(peak, 0.9f);
-            for (int k = 0; k < n; k++) s[k] = (short) Math.max(-32768, Math.min(32767, y[k] * g * 32767f));
-
-            int chMask = ch == 1 ? AudioFormat.CHANNEL_OUT_MONO : AudioFormat.CHANNEL_OUT_STEREO;
-            int minBuf = AudioTrack.getMinBufferSize(rate, chMask, AudioFormat.ENCODING_PCM_16BIT);
-            t = new AudioTrack(
-                    new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build(),
-                    new AudioFormat.Builder().setSampleRate(rate).setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                            .setChannelMask(chMask).build(),
-                    Math.max(minBuf * 4, 8192), AudioTrack.MODE_STREAM, AudioManager.AUDIO_SESSION_ID_GENERATE);
-            if (t.getState() != AudioTrack.STATE_INITIALIZED) throw new Exception("AudioTrack");
-            t.play();
-            emitSpoke("Effekt");
-            int pos = 0, chunk = 4096;
-            while (pos < n && token == tk) {
-                int w2 = t.write(s, pos, Math.min(chunk, n - pos));
-                if (w2 <= 0) throw new Exception("write " + w2);
-                pos += w2;
-            }
-            // warten, bis alles abgespielt ist
-            int frames = n / ch;
-            long until = System.currentTimeMillis() + (long) (frames * 1000.0 / rate) + 1500;
-            while (token == tk && t.getPlaybackHeadPosition() < frames - 10 && System.currentTimeMillis() < until) {
-                Thread.sleep(30);
-            }
-            t.stop();
-            t.release();
-            t = null;
-            f.delete();
-            speechFinished(tk);
-        } catch (Exception e) {
-            if (t != null) { try { t.release(); } catch (Exception ignored) { } }
-            f.delete();
-            fxPlaying = false;
-            main.post(() -> speakPlain(tk));
-        }
     }
 
     @Override
     protected void handleOnDestroy() {
         wantListen = false;
         killRec();
+        restoreVolume();
         dropFocus();
         if (tts != null) { tts.stop(); tts.shutdown(); tts = null; }
     }

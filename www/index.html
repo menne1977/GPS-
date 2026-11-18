@@ -75,7 +75,7 @@ const TAB={DE:{urban:50,rural:100,motorway:130},AT:{urban:50,rural:100,motorway:
 FR:{urban:50,rural:80,motorway:130},IT:{urban:50,rural:90,motorway:130},NL:{urban:50,rural:80,motorway:100},PL:{urban:50,rural:90,motorway:140}};
 const WX={0:'Sonne',1:'überwiegend sonnig',2:'teils bewölkt',3:'bedeckt',45:'Nebel',48:'Nebel',51:'Niesel',53:'Niesel',55:'Niesel',61:'Regen',63:'Regen',65:'starker Regen',71:'Schnee',73:'Schnee',75:'starker Schnee',80:'Schauer',81:'Schauer',82:'starke Schauer',95:'Gewitter',96:'Gewitter mit Hagel',99:'Gewitter mit Hagel'};
 // Abfrage-Intervalle in Minuten; Datenquellen einzeln schaltbar, Datensparmodus schaltet alle Abrufe ab.
-const DEF={global:{analog:false,awake:true,orient:'off',tol:5,tpl:'{speed} km/h · {temp}°C · Limit {limit}',sparmodus:false,style:'digital',voice:false,vfx:true,vname:'',scFuel:false,scTraffic:false,wake:true,anrede:'Michael',vpitch:0.7,vrate:0.95,
+const DEF={global:{analog:false,awake:true,orient:'off',tol:5,tpl:'{speed} km/h · {temp}°C · Limit {limit}',sparmodus:false,style:'digital',voice:false,vvol:80,vname:'',scFuel:false,scTraffic:false,wake:true,anrede:'Michael',vpitch:0.85,vrate:0.95,
  src:{weather:true,dwd:true,fuel:true,limit:true,heat:true,sat:true,autobahn:true},iv:{weather:30,dwd:15,fuel:30},fuelKm:5,},
  widgets:{},trip:{total:0,trip:0},day:{d:'',max:0,mt:0,dist:0},reports:[],last:{}};
 WIDGETS.forEach(w=>DEF.widgets[w.id]={on:true,color:'#e8eef5',scale:1});
@@ -356,9 +356,9 @@ function say(t){
  toast('KITT: '+t);
  if(!Voice){webSay(t);return}
  const t0=Date.now();
- Voice.speak({text:t,pitch:+S.global.vpitch,rate:+S.global.vrate,voice:S.global.vname||'',fx:!!S.global.vfx}).catch(e=>toast('Sprachausgabe: '+(e&&e.message||e),6000));
+ Voice.speak({text:t,pitch:+S.global.vpitch,rate:+S.global.vrate,voice:S.global.vname||'',volume:+S.global.vvol}).catch(e=>toast('Sprachausgabe: '+(e&&e.message||e),6000));
  // Kommt vom Handy kein Ton, wird die Browser-Stimme der App benutzt
- setTimeout(()=>{if(lastSpoke<t0){voiceLast='stumm';const el=$('#vstat');if(el)el.textContent='Status: stumm';toast('Sprachausgabe bleibt stumm. Bitte Medienlautstärke und Android-Einstellungen > Text-zu-Sprache prüfen, oder im Menü den Roboter-Effekt ausschalten.',8000);webSay(t)}},6000);
+ setTimeout(()=>{if(lastSpoke<t0){voiceLast='stumm';const el=$('#vstat');if(el)el.textContent='Status: stumm';toast('Sprachausgabe bleibt stumm. Bitte Medienlautstärke und Android-Einstellungen > Text-zu-Sprache prüfen, oder im Menü „Stimme prüfen“ antippen.',8000);webSay(t)}},6000);
 }
 function webListen(on){
  if(!on){if(wr){wr.onend=null;try{wr.stop()}catch(_){}wr=null}return true}
@@ -665,11 +665,12 @@ function buildPanel(){
  <div class="row"><label>Anrede</label><input data-g="anrede" value="${esc(S.global.anrede)}" style="width:120px"></div>
  <div class="small" id="vstat">Status: ${esc(voiceLast)}</div>
  <div class="row"><label>Stimme</label><select data-g="vname" style="max-width:190px"><option value="">Standard</option>${voiceList.map(v=>`<option value="${esc(v.name)}" ${S.global.vname===v.name?'selected':''}>${esc(v.name)}${v.network?' (online)':''}</option>`).join('')}</select></div>
- <div class="row"><label>Roboter-Effekt (KITT-Klang)</label><input type="checkbox" data-g="vfx" ${S.global.vfx?'checked':''}></div>
+ <div class="row"><label>Lautstärke KITT <span id="vvolv">${S.global.vvol}</span> %</label><input type="range" min="10" max="100" step="5" data-g="vvol" value="${S.global.vvol}" style="width:140px"></div>
+ <div class="small">Setzt die Medienlautstärke während der Ansage auf diesen Wert, danach zurück.</div>
  <div class="row"><label>Tonhöhe</label><input type="range" min="0.4" max="1.6" step="0.05" data-g="vpitch" value="${S.global.vpitch}" style="width:140px"></div>
  <div class="row"><label>Sprechtempo</label><input type="range" min="0.6" max="1.5" step="0.05" data-g="vrate" value="${S.global.vrate}" style="width:140px"></div>
- <div class="row"><button id="vtest">Stimme testen</button><button id="vkitt">KITT-Einstellung</button><button id="refall">Alles jetzt aktualisieren</button></div>
- <div class="small">Beispiele: „KITT, wie schnell fahre ich?“, „KITT, Super Pursuit Mode“ – auch Beschleunigung, Bremsen, Höhe, Wetter, Tankstelle, Stau, Warnung, Tagesstrecke, Satelliten, Richtung, Uhrzeit, Hilfe. Die Originalstimme der Serie lässt sich nicht nachbilden; genutzt wird die deutsche Android-Stimme, Tonhöhe und Tempo sind einstellbar.</div>
+ <div class="row"><button id="vtest">Stimme testen</button><button id="vcheck">Stimme prüfen</button><button id="refall">Alles jetzt aktualisieren</button></div>
+ <div class="small">Beispiele: „KITT, wie schnell fahre ich?“, „KITT, Super Pursuit Mode“ – auch Beschleunigung, Bremsen, Höhe, Wetter, Tankstelle, Stau, Warnung, Tagesstrecke, Satelliten, Richtung, Uhrzeit, Hilfe. Genutzt wird die deutsche Android-Stimme; Stimme, Lautstärke, Tonhöhe und Tempo sind einstellbar.</div>
  <h3>Daten & Sensoren</h3>
  <div class="row"><button id="sens">Bewegungssensor aktivieren</button><button id="rtrip">Tagesstrecke 0</button></div>
  <div class="row"><button id="reset">Alles zurücksetzen</button></div>
@@ -683,6 +684,7 @@ $('#panel').addEventListener('input',e=>{const t=e.target;
  if(t.dataset.w){const c=S.widgets[t.dataset.w],k=t.dataset.k;c[k]=t.type==='checkbox'?t.checked:(k==='scale'?+t.value:t.value)}
  if(t.dataset.g){const k=t.dataset.g;S.global[k]=t.type==='checkbox'?t.checked:(t.type==='number'||t.type==='range'?+t.value:t.value)}
  if(t.id==='vmic'){setVoice(t.checked);return}
+ if(t.dataset.g==='vvol'){const o=$('#vvolv');if(o)o.textContent=t.value}
  if(t.dataset.src){S.global.src[t.dataset.src]=t.checked}
  if(t.dataset.src==='sat'){t.checked?startSat():stopSat()}
  if(t.dataset.iv){S.global.iv[t.dataset.iv]=+t.value}
@@ -692,7 +694,16 @@ $('#panel').addEventListener('click',async e=>{const id=e.target.id;
  if(id==='close')$('#menu').classList.remove('open');
  if(id==='addrep'){const v=$('#rep').value.trim();if(v){S.reports.unshift({t:Date.now(),txt:v});S.reports=S.reports.slice(0,20);save();$('#rep').value='';renderAll()}}
  if(id==='rtrip'){S.trip.trip=0;save();renderAll()}
- if(id==='vkitt'){S.global.vpitch=0.65;S.global.vrate=0.9;S.global.vfx=true;save();buildPanel();say(`${S.global.anrede||'Michael'}, KITT-Einstellung aktiv.`)}
+ if(id==='vcheck'){
+  const el=$('#vstat');
+  if(!Voice){if(el)el.textContent='Status: Prüfung nur in der APK möglich';return}
+  if(el)el.textContent='Status: prüfe…';
+  Voice.check().then(r=>{
+   const txt=`Dienst: ${r.engine} · ${r.language} · Stimme: ${r.voice} · Medienlautstärke: ${r.media<0?'?':r.media+' %'}`;
+   if(el)el.textContent=txt;
+   say(`${S.global.anrede||'Michael'}, Sprachprüfung. Lautstärke ${S.global.vvol} Prozent.`);
+  }).catch(e=>{if(el)el.textContent='Status: Prüfung fehlgeschlagen: '+(e&&e.message||e)});
+ }
  if(id==='vtest')say(`${S.global.anrede||'Michael'}, hier ist KITT. Alle Systeme laufen.`);
  if(id==='refall'){lastLimitPos=null;refreshNow(['fuel','ab','wx','dwd','heat']);$('#menu').classList.remove('open')}
  if(id==='sens'){try{if(window.DeviceMotionEvent?.requestPermission)await DeviceMotionEvent.requestPermission();if(window.DeviceOrientationEvent?.requestPermission)await DeviceOrientationEvent.requestPermission()}catch(_){}}
