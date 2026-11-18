@@ -17,6 +17,25 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font-family
 .small{font-size:calc(var(--s,1)*13px);color:var(--mut);margin-top:4px}
 .alert{display:none;position:absolute;top:0;left:0;right:0;padding:4px;background:var(--warn);color:#000;font-weight:700;font-size:13px;border-radius:14px 14px 0 0}
 .analog{width:100%;max-width:230px}
+.rg{width:100%;max-width:300px;height:auto}
+.th{width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box;padding:4px}
+.th-num{font-weight:900;line-height:1;font-size:calc(var(--s,1)*96px);font-variant-numeric:tabular-nums}
+.th-unit{letter-spacing:3px;font-size:12px;color:var(--mut)}
+.th-bar{width:90%;height:10px;background:#222;margin-top:6px;overflow:hidden;border-radius:3px}
+.th-bar i{display:block;height:10px;transition:width .25s}
+.th-sport .th-num{color:#ff3b1f;font-style:italic;text-shadow:0 0 12px #ff3b1f55}
+.th-sport .th-bar i{background:#ff3b1f;transform:skewX(-14deg)}
+.th-racer .th-num{color:#fff;font-style:italic;text-shadow:0 0 18px #2a7bff}
+.th-racer .th-unit{color:#7fe0ff}
+.th-racer .th-bar i{background:linear-gradient(90deg,#2a7bff,#7fe0ff)}
+.th-robust{border:3px solid #ddd;border-radius:6px;padding:8px;background:#1a1a1a}
+.th-robust .th-box{background:#000;padding:4px 16px;border:2px solid #ddd}
+.th-robust .th-num{font-family:monospace;font-weight:800;font-size:calc(var(--s,1)*80px)}
+.th-neutral .th-num{font-weight:300;color:#cfd6df}
+.th-spiel .th-num{background:linear-gradient(90deg,#ff4fd8,#7fffd4,#ffd84f);-webkit-background-clip:text;background-clip:text;color:transparent}
+.th-spiel .th-unit{color:#7fffd4}
+details.anl{margin:6px 0;background:var(--card);border-radius:10px;padding:6px 10px;font-size:13px;line-height:1.5}
+details.anl summary{cursor:pointer;font-weight:700}
 ul.list{list-style:none;padding:0;margin:0;font-size:13px;width:100%}
 ul.list li{display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid #223040;padding:4px 0}
 li.nav{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:manipulation}
@@ -96,8 +115,9 @@ WIDGETS.forEach(w=>{const d=document.createElement('div');d.className='w';d.id='
 
 function applyCfg(){
  WIDGETS.forEach(w=>{const c=S.widgets[w.id],el=$('#w-'+w.id);el.style.display=c.on?'':'none';el.style.color=c.color;el.style.flexBasis=(w.base*c.scale)+'px';el.style.setProperty('--s',c.scale)});
- const sp=$('#w-speed');if(S.global.style==='cockpit'){sp.style.flexBasis='100%';sp.style.minWidth='100%'}else sp.style.minWidth='';
+ const sp=$('#w-speed');if(LAND.includes(S.global.style)){sp.style.flexBasis='100%';sp.style.minWidth='100%'}else sp.style.minWidth='';
 }
+const LAND=['cockpit','rund','sport','racer','robust','neutral','spiel'];
 let wl=null;
 async function wake(){try{if(S.global.awake&&'wakeLock' in navigator){if(!wl){wl=await navigator.wakeLock.request('screen');wl.addEventListener('release',()=>wl=null)}}else if(wl){await wl.release();wl=null}}catch(e){}}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')wake()});
@@ -111,9 +131,26 @@ function gauge(v){
  return `<svg class="analog" viewBox="0 0 200 200"><circle cx="100" cy="100" r="98" fill="none" stroke="#2a3644" stroke-width="2"/>${ticks}<g transform="rotate(${ang} 100 100)"><line x1="100" y1="100" x2="100" y2="22" stroke="#ff5252" stroke-width="3"/></g><circle cx="100" cy="100" r="6" fill="currentColor"/><text x="100" y="150" font-size="18" text-anchor="middle" fill="currentColor">${Math.round(v)} km/h</text></svg>`;
 }
 
+function roundGauge(v){
+ const max=200,f=Math.min(Math.max(v,0),max)/max,P=(d,r)=>[100+r*Math.cos(d*Math.PI/180),100+r*Math.sin(d*Math.PI/180)];
+ const [sx,sy]=P(-210,80),[ex,ey]=P(-210+240*f,80),big=240*f>180?1:0,[bx,by]=P(30,80);
+ let t='';for(let i=0;i<=40;i++){const d=-210+240*i/40,[x1,y1]=P(d,i%5?84:76),[x2,y2]=P(d,88);t+=`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${i%5?'#4d6480':'#dbe8f5'}" stroke-width="${i%5?1:2}"/>`;
+  if(i%5===0){const [lx,ly]=P(d,62);t+=`<text x="${lx.toFixed(1)}" y="${(ly+3).toFixed(1)}" font-size="9" text-anchor="middle" fill="#9fb6cc">${Math.round(max*i/40)}</text>`}}
+ return `<svg class="rg" viewBox="0 0 200 200"><circle cx="100" cy="100" r="96" fill="#0a1320" stroke="#1a2a3a" stroke-width="2"/><path d="M${sx.toFixed(1)} ${sy.toFixed(1)} A80 80 0 1 1 ${bx.toFixed(1)} ${by.toFixed(1)}" fill="none" stroke="#17324d" stroke-width="8" stroke-linecap="round"/>${f>0?`<path d="M${sx.toFixed(1)} ${sy.toFixed(1)} A80 80 0 ${big} 1 ${ex.toFixed(1)} ${ey.toFixed(1)}" fill="none" stroke="#3aa0ff" stroke-width="8" stroke-linecap="round"/>`:''}${t}<text x="100" y="112" font-size="46" font-weight="700" text-anchor="middle" fill="#fff">${Math.round(v)}</text><text x="100" y="132" font-size="11" text-anchor="middle" fill="#7d95ad">km/h</text></svg>`;
+}
+function themeSpeed(v,st){
+ const n=Math.round(v),pct=Math.min(100,v/2.5),bar=`<div class="th-bar"><i style="width:${pct.toFixed(1)}%"></i></div>`;
+ if(st==='rund')return roundGauge(v);
+ if(st==='sport')return `<div class="th th-sport"><span class="th-num">${n}</span><span class="th-unit">KM/H</span>${bar}</div>`;
+ if(st==='racer')return `<div class="th th-racer"><span class="th-num">${n}</span><span class="th-unit">KM/H · ${v.toFixed(1)}</span>${bar}</div>`;
+ if(st==='robust')return `<div class="th th-robust"><div class="th-box"><span class="th-num">${n}</span></div><span class="th-unit">KM/H</span></div>`;
+ if(st==='neutral')return `<div class="th th-neutral"><span class="th-num">${n}</span><span class="th-unit">km/h</span></div>`;
+ if(st==='spiel')return `<div class="th th-spiel"><span class="th-num">${n}</span><span class="th-unit">km/h · ${limit!=null&&v>limit+S.global.tol?'Du bist zu schnell!':'Alles im Grünen'}</span></div>`;
+ return null;
+}
 function renderSpeed(){
- const v=speedKmh;
- $('#b-speed').innerHTML=S.global.style==='cockpit'?cockpit(v):S.global.style==='analog'?gauge(v):`<div class="big">${Math.round(v)}</div><div class="unit">km/h</div>`;
+ const v=speedKmh,st=S.global.style,th=themeSpeed(v,st);
+ $('#b-speed').innerHTML=st==='cockpit'?cockpit(v):st==='analog'?gauge(v):th!=null?th:`<div class="big">${Math.round(v)}</div><div class="unit">km/h</div>`;
  const over=limit!=null&&v>limit+S.global.tol;
  const al=$('#al-speed');al.style.display=over?'block':'none';if(over)al.textContent=`ÜBER DEM LIMIT +${Math.round(v-limit)} km/h`;
 }
@@ -502,6 +539,11 @@ function kittAnswer(t){
  }
  if(has(/uhr|zeit/)){const d=new Date();return `Es ist ${d.getHours()} Uhr ${d.getMinutes()}.`}
  if(has(/hilfe|was kannst/))return 'Frag mich nach Geschwindigkeit, Beschleunigung, Bremsen, Höhe, Wetter, Tankstellen, Stau, Warnungen, Tagesstrecke, Satelliten, Richtung oder der Uhrzeit.';
+ if(has(/witz|lustig|spaß|spass/i)){const J=['Was sagt ein Reifen zum anderen? Ich bin völlig platt.','Was macht ein Auto im Garten? Es parkt.','Warum hat der Tacho nie Stress? Er behält immer alles im Blick.'];return J[Math.floor(Math.random()*J.length)]}
+ if(has(/hallo|hey|servus|guten tag/i))return `Hallo ${A}. Alle Systeme sind bereit.`;
+ if(has(/wer bist|dein name|wie heißt du/i))return 'Ich bin KITT, dein Fahrassistent. Ohne Turbo, aber mit GPS.';
+ if(has(/scanner|scan/i))return `Scanner aktiv. Ich sehe Geschwindigkeit, Wetter und Stau, ${A}.`;
+ if(has(/fahr los|los geht|gas geben/i))return `Dann mal los, ${A}. Ich halte den Scanner offen.`;
  if(has(/danke/))return `Gern geschehen, ${A}.`;
  return `Das habe ich nicht verstanden, ${A}.`;
 }
@@ -693,7 +735,13 @@ window.addEventListener('deviceorientationabsolute',e=>dor(e,true));window.addEv
 // Menü
 function buildPanel(){
  const s=S.global.src,iv=S.global.iv;
- let h=`<div class="row"><b>Einstellungen</b><button id="close">✕</button></div><h3>Anzeigen</h3>`;
+ let h=`<div class="row"><b>Einstellungen</b><button id="close">✕</button></div>
+ <details class="anl"><summary>Anleitung</summary>
+ <p>Tacho-Stil: Unter „Allgemein“ wählst du Digital, Analog, Rund, Sport, Racer, Robust, Neutral oder Verspielt. Die Querformat-Stile füllen die ganze Breite.</p>
+ <p>KITT: Mikrofon antippen und sprechen, z. B. „Wie schnell fahre ich?“, „Wetter“, „Tankstelle“, „Stau“, „Höhe“, „Witz“ oder „Super Pursuit Mode“.</p>
+ <p>Aktivierungswort: Unter „Betriebsart“ auf „Immer bereit“ stellen, dann reagiert die App nur auf „KITT“.</p>
+ <p>Trip: Der Knopf unter der Trip-Anzeige setzt die Tagesstrecke auf null. Tankstellen und Stau kannst du mit „Aktualisieren“ sofort neu abrufen.</p>
+ </details><h3>Anzeigen</h3>`;
  WIDGETS.forEach(w=>{const c=S.widgets[w.id];h+=`<div class="row"><label><input type="checkbox" data-w="${w.id}" data-k="on" ${c.on?'checked':''}> ${w.name}</label><input type="color" data-w="${w.id}" data-k="color" value="${c.color}"><input type="range" min="0.6" max="1.8" step="0.05" value="${c.scale}" data-w="${w.id}" data-k="scale" style="width:90px"></div>`});
  h+=`<h3>Heute</h3>
  <div class="small">Höchstwert: ${Math.round(S.day.max)} km/h · Ø bewegt: ${S.day.mt>0?Math.round(S.day.dist/(S.day.mt/3600000)):0} km/h · Strecke: ${S.day.dist.toFixed(1)} km</div>
@@ -708,7 +756,7 @@ function buildPanel(){
  <div class="row"><label>GPS-Satelliten (nur APK)</label><input type="checkbox" data-src="sat" ${s.sat?'checked':''}></div>
  <div class="row"><label>Tempolimit (OSM)</label><input type="checkbox" data-src="limit" ${s.limit?'checked':''}></div>
  <h3>Allgemein</h3>
- <div class="row"><label>Tacho-Stil</label><select data-g="style"><option value="digital" ${S.global.style==='digital'?'selected':''}>Digital</option><option value="analog" ${S.global.style==='analog'?'selected':''}>Analog</option><option value="cockpit" ${S.global.style==='cockpit'?'selected':''}>Cockpit (Querformat)</option></select></div>
+ <div class="row"><label>Tacho-Stil</label><select data-g="style">${[['digital','Digital'],['analog','Analog'],['cockpit','Cockpit (Querformat)'],['rund','Rund (Querformat)'],['sport','Sport (Querformat)'],['racer','Racer blau (Querformat)'],['robust','Robust (Querformat)'],['neutral','Neutral (Querformat)'],['spiel','Verspielt (Querformat)']].map(([k,l])=>`<option value="${k}" ${S.global.style===k?'selected':''}>${l}</option>`).join('')}</select></div>
  <div class="row"><label>Bildschirm anlassen</label><input type="checkbox" data-g="awake" ${S.global.awake?'checked':''}></div>
  <div class="row"><label>Drehung sperren</label><select data-g="orient"><option value="off" ${S.global.orient==='off'?'selected':''}>aus</option><option value="portrait" ${S.global.orient==='portrait'?'selected':''}>Hochformat</option><option value="landscape" ${S.global.orient==='landscape'?'selected':''}>Querformat</option></select></div>
  <div class="row"><label>Toleranz km/h</label><input type="number" min="0" max="30" data-g="tol" value="${S.global.tol}" style="width:70px"></div>
