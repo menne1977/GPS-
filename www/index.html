@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>GPS Fahr-Dashboard</title>
+<style>
+:root{--bg:#0b0f14;--card:#141b24;--txt:#e8eef5;--mut:#7d8a99;--warn:#ff5252;--ok:#3ddc97}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font-family:system-ui,sans-serif;overflow:hidden}
+#app{display:flex;flex-wrap:wrap;gap:8px;padding:8px;height:100%;align-content:flex-start;overflow:auto;padding-top:48px}
+.w{background:var(--card);border-radius:14px;padding:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1 1 160px;min-width:120px;min-height:110px;position:relative;text-align:center}
+.w h4{margin:0 0 4px;font-size:11px;color:var(--mut);font-weight:500;letter-spacing:.5px}
+.big{font-size:calc(var(--s,1)*64px);font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.unit{font-size:14px;color:var(--mut)}
+.small{font-size:calc(var(--s,1)*13px);color:var(--mut);margin-top:4px}
+.alert{display:none;position:absolute;top:0;left:0;right:0;padding:4px;background:var(--warn);color:#000;font-weight:700;font-size:13px;border-radius:14px 14px 0 0}
+.analog{width:100%;max-width:230px}
+ul.list{list-style:none;padding:0;margin:0;font-size:13px;width:100%}
+ul.list li{display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid #223040;padding:4px 0}
+#open{position:fixed;top:6px;right:6px;z-index:5;background:#22303f;color:var(--txt);border:0;border-radius:8px;padding:6px 10px;font-size:18px}
+#menu{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;justify-content:flex-end;z-index:9}
+#menu.open{display:flex}
+#panel{background:var(--card);width:min(380px,100%);height:100%;overflow:auto;padding:14px;font-size:14px}
+#panel h3{margin:16px 0 6px;color:var(--ok);font-size:15px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0;flex-wrap:wrap}
+button{background:#22303f;color:var(--txt);border:0;border-radius:8px;padding:8px 10px;font-size:14px}
+input[type=color]{width:44px;height:28px;border:0;background:none}
+input,select,textarea{background:#0b0f14;color:#fff;border:0;border-radius:8px;padding:6px}
+</style>
+</head>
+<body>
+<button id="open" aria-label="Menü">☰</button>
+<div id="app"></div>
+<div id="menu"><div id="panel"></div></div>
+<script>
+const $=s=>document.querySelector(s);
+const WIDGETS=[
+{id:'speed',name:'Geschwindigkeit',base:320},
+{id:'limit',name:'Erlaubt hier',base:170},
+{id:'accel',name:'Beschleunigung',base:170},
+{id:'trip',name:'Kilometer',base:200},
+{id:'day',name:'Heute',base:200},
+{id:'compass',name:'Kompass',base:150},
+{id:'weather',name:'Wetter',base:230},
+{id:'warn',name:'DWD-Warnung',base:230},
+{id:'fuel',name:'Tankstellen (ohne Preise)',base:280},
+{id:'traffic',name:'Stau-Meldungen',base:260},
+{id:'custom',name:'Eigene Anzeige',base:220}];
+// Richtwerte je Land (km/h): Ortschaft, Landstraße, Autobahn. Nur Fallback ohne OSM-Angabe.
+const TAB={DE:{urban:50,rural:100,motorway:130},AT:{urban:50,rural:100,motorway:130},CH:{urban:50,rural:80,motorway:120},
+FR:{urban:50,rural:80,motorway:130},IT:{urban:50,rural:90,motorway:130},NL:{urban:50,rural:80,motorway:100},PL:{urban:50,rural:90,motorway:140}};
+const WX={0:'Sonne',1:'überwiegend sonnig',2:'teils bewölkt',3:'bedeckt',45:'Nebel',48:'Nebel',51:'Niesel',53:'Niesel',55:'Niesel',61:'Regen',63:'Regen',65:'starker Regen',71:'Schnee',73:'Schnee',75:'starker Schnee',80:'Schauer',81:'Schauer',82:'starke Schauer',95:'Gewitter',96:'Gewitter mit Hagel',99:'Gewitter mit Hagel'};
+// Abfrage-Intervalle in Minuten; Datenquellen einzeln schaltbar, Datensparmodus schaltet alle Abrufe ab.
+const DEF={global:{analog:false,awake:true,orient:'off',tol:5,tpl:'{speed} km/h · {temp}°C · Limit {limit}',sparmodus:false,
+ src:{weather:true,dwd:true,fuel:true,limit:true},iv:{weather:30,dwd:15,fuel:30},warncell:'',},
+ widgets:{},trip:{total:0,trip:0},day:{d:'',max:0,mt:0,dist:0},reports:[],last:{}};
+WIDGETS.forEach(w=>DEF.widgets[w.id]={on:true,color:'#e8eef5',scale:1});
+function load(){try{const x=JSON.parse(localStorage.getItem('gpsdash')||'null');if(x){const d=structuredClone(DEF);return Object.assign(d,x,{global:Object.assign(d.global,x.global,{src:Object.assign(d.global.src,x.global?.src||{}),iv:Object.assign(d.global.iv,x.global?.iv||{})}),widgets:Object.assign(d.widgets,x.widgets),trip:Object.assign(d.trip,x.trip),day:Object.assign(d.day,x.day)})}}catch(e){}return structuredClone(DEF)}
+let S=load();
+function save(){try{localStorage.setItem('gpsdash',JSON.stringify(S))}catch(e){}}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function hav(a,b,c,d){const R=6371000,r=x=>x*Math.PI/180;const dA=r(c-a),dB=r(d-b);const h=Math.sin(dA/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(dB/2)**2;return 2*R*Math.asin(Math.sqrt(h))}
+
+// Zustand
+let speedKmh=0,accel=null,zeroRes=null,gForce=0,heading=null,compassDev=null,limit=null,limitSrc='',fuelList=[],wx=null,warn=null,lat=null,lon=null,lastPos=null,zeroT=null;
+let fuelPos=null,wxPos=null,lastLimitPos=null;
+
+WIDGETS.forEach(w=>{const d=document.createElement('div');d.className='w';d.id='w-'+w.id;d.innerHTML=`<div class="alert" id="al-${w.id}"></div><h4>${w.name}</h4><div id="b-${w.id}"></div>`;$('#app').appendChild(d)});
+
+function applyCfg(){
+ WIDGETS.forEach(w=>{const c=S.widgets[w.id],el=$('#w-'+w.id);el.style.display=c.on?'':'none';el.style.color=c.color;el.style.flexBasis=(w.base*c.scale)+'px';el.style.setProperty('--s',c.scale)});
+}
+let wl=null;
+async function wake(){try{if(S.global.awake&&'wakeLock' in navigator){if(!wl){wl=await navigator.wakeLock.request('screen');wl.addEventListener('release',()=>wl=null)}}else if(wl){await wl.release();wl=null}}catch(e){}}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')wake()});
+async function applyOrient(){try{if(S.global.orient==='off'){screen.orientation.unlock()}else{await screen.orientation.lock(S.global.orient==='portrait'?'portrait-primary':'landscape-primary')}}catch(e){}}
+
+function gauge(v){
+ const max=220;let ticks='';
+ for(let i=0;i<=max;i+=20){const a=(-135+270*i/max)*Math.PI/180;const x1=100+80*Math.sin(a),y1=100-80*Math.cos(a),x2=100+92*Math.sin(a),y2=100-92*Math.cos(a),tx=100+68*Math.sin(a),ty=100-68*Math.cos(a)+4;
+  ticks+=`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="currentColor" stroke-width="2"/><text x="${tx}" y="${ty}" font-size="11" text-anchor="middle" fill="currentColor">${i}</text>`}
+ const ang=-135+270*Math.min(v,max)/max;
+ return `<svg class="analog" viewBox="0 0 200 200"><circle cx="100" cy="100" r="98" fill="none" stroke="#2a3644" stroke-width="2"/>${ticks}<g transform="rotate(${ang} 100 100)"><line x1="100" y1="100" x2="100" y2="22" stroke="#ff5252" stroke-width="3"/></g><circle cx="100" cy="100" r="6" fill="currentColor"/><text x="100" y="150" font-size="18" text-anchor="middle" fill="currentColor">${Math.round(v)} km/h</text></svg>`;
+}
+
+function renderSpeed(){
+ const v=speedKmh;
+ $('#b-speed').innerHTML=S.global.analog?gauge(v):`<div class="big">${Math.round(v)}</div><div class="unit">km/h</div>`;
+ const over=limit!=null&&v>limit+S.global.tol;
+ const al=$('#al-speed');al.style.display=over?'block':'none';if(over)al.textContent=`ÜBER DEM LIMIT +${Math.round(v-limit)} km/h`;
+}
+function renderLimit(){$('#b-limit').innerHTML=`<div class="big">${limit??'–'}</div><div class="unit">km/h</div><div class="small">${esc(limitSrc)}</div>`}
+function renderAccel(){$('#b-accel').innerHTML=`<div class="big">${accel==null?'–':accel.toFixed(1)}</div><div class="unit">m/s² (GPS)</div><div class="small">0–100: ${zeroRes?zeroRes.toFixed(1)+' s':'–'} · Sensor: ${gForce.toFixed(2)} g</div>`}
+function renderTrip(){$('#b-trip').innerHTML=`<div class="big">${S.trip.trip.toFixed(1)}</div><div class="unit">km Tagesstrecke</div><div class="small">Gesamt ${S.trip.total.toFixed(0)} km</div>`}
+function renderDay(){
+ const avg=S.day.mt>0?Math.round(S.day.dist/(S.day.mt/3600000)):0;
+ $('#b-day').innerHTML=`<div class="big" style="font-size:calc(var(--s,1)*36px)">${Math.round(S.day.max)}</div><div class="unit">km/h Höchstwert</div><div class="small">Ø bewegt ${avg} km/h · ${S.day.dist.toFixed(1)} km</div>`;
+}
+function renderCompass(){
+ const h=heading??compassDev;const d=['N','NO','O','SO','S','SW','W','NW'];
+ $('#b-compass').innerHTML=h==null?'<div class="small">keine Richtung</div>':`<div class="big">${d[Math.round(h/45)%8]}</div><div class="unit">${Math.round(h)}°</div>`;
+}
+function renderWeather(){
+ if(!S.global.src.weather){$('#b-weather').innerHTML='<div class="small">Wetter aus (Datensparmodus/Schalter)</div>';return}
+ if(!wx){$('#b-weather').innerHTML='<div class="small">Wetter lädt…</div>';return}
+ const c=wx.cur,pp=wx.pp,rainIn=pp.findIndex(p=>p>=50);
+ $('#b-weather').innerHTML=`<div class="big">${Math.round(c.temperature_2m)}°</div><div class="unit">${esc(WX[c.weather_code]||'wechselhaft')}</div><div class="small">${rainIn>=0?`Regen wahrscheinlich in ${rainIn} h (${pp[rainIn]}%)`:'kein Regen in den nächsten 6 h'}</div><div class="small">Böen ${Math.round(c.wind_gusts_10m)} km/h</div>`;
+}
+function renderWarn(){
+ if(!S.global.src.dwd){$('#b-warn').innerHTML='<div class="small">DWD aus (Schalter)</div>';return}
+ if(!S.global.warncell){$('#b-warn').innerHTML='<div class="small">Gemeinde-Kennung im Menü eintragen</div>';return}
+ const list=warn||[];const al=$('#al-warn');
+ al.style.display=list.length?'block':'none';if(list.length)al.textContent='AMTLICHE WARNUNG';
+ $('#b-warn').innerHTML=list.length?`<ul class="list">${list.slice(0,4).map(w=>`<li><span>${esc(w.event)}</span><span>${esc(w.level)}</span></li>`).join('')}</ul>`:'<div class="small">Keine aktiven Warnungen für diese Gemeinde</div><div class="small">Quelle: DWD</div>';
+}
+function renderFuel(){
+ if(!S.global.src.fuel){$('#b-fuel').innerHTML='<div class="small">Tankstellen aus (Schalter)</div>';return}
+ $('#b-fuel').innerHTML=fuelList.length?`<ul class="list">${fuelList.map(f=>`<li><span>${esc(f.name)}</span><span>${f.d.toFixed(1)} km</span></li>`).join('')}</ul><div class="small">Preise nicht enthalten</div>`:'<div class="small">Keine Tankstelle im Umkreis von 5 km</div>';
+}
+function renderTraffic(){
+ $('#b-traffic').innerHTML=S.reports.length?`<ul class="list">${S.reports.slice(0,5).map(r=>`<li><span>${esc(r.txt)}</span><span>${new Date(r.t).toTimeString().slice(0,5)}</span></li>`).join('')}</ul><div class="small">Eigene Meldungen</div>`:'<div class="small">Keine Meldungen. Über ☰ eintragen.</div>';
+}
+function renderCustom(){
+ const vals={speed:Math.round(speedKmh),limit:limit??'–',temp:wx?Math.round(wx.cur.temperature_2m):'–',km:S.trip.total.toFixed(1),trip:S.trip.trip.toFixed(1),time:new Date().toTimeString().slice(0,5)};
+ $('#b-custom').innerHTML=`<div class="big" style="font-size:calc(var(--s,1)*26px)">${esc(S.global.tpl).replace(/\{(\w+)\}/g,(m,k)=>vals[k]??m)}</div>`;
+}
+function renderAll(){renderSpeed();renderLimit();renderAccel();renderTrip();renderDay();renderCompass();renderWeather();renderWarn();renderFuel();renderTraffic();renderCustom()}
+
+// Abrufe (nur mit Schalter an, im Intervall)
+async function ov(q){const r=await fetch('https://overpass-api.de/api/interpreter?data='+encodeURIComponent(q));if(!r.ok)throw new Error('overpass');return r.json()}
+function parseLimit(tags,country){
+ const ms=tags.maxspeed;const pre=((ms||'').match(/^([A-Z]{2}):/)||[])[1]||country||'DE';const T=TAB[pre]||TAB.DE;
+ if(ms){
+  const n=ms.match(/^(\d+)$/);if(n)return{v:+n[1],src:'OSM-Angabe'};
+  if(ms==='none')return{v:T.motorway,src:'frei, Richtwert Autobahn'};
+  if(/urban/.test(ms))return{v:T.urban,src:'Richtwert '+pre+' Ortschaft'};
+  if(/rural/.test(ms))return{v:T.rural,src:'Richtwert '+pre+' Landstraße'};
+  if(/motorway/.test(ms))return{v:T.motorway,src:'Richtwert '+pre+' Autobahn'};
+ }
+ const h=tags.highway;
+ if(h==='motorway'||h==='motorway_link')return{v:T.motorway,src:'Richtwert Autobahn'};
+ if(h==='living_street')return{v:7,src:'Richtwert Spielstraße'};
+ if(h==='residential')return{v:T.urban,src:'Richtwert Wohnstraße'};
+ return{v:T.rural,src:'Richtwert Landstraße'};
+}
+let country=null;
+async function fetchLimit(){
+ if(!S.global.src.limit)return;
+ const j=await ov(`[out:json][timeout:10];way(around:25,${lat},${lon})["highway"];out tags 5;`);
+ const el=j.elements||[];if(!el.length){limit=null;limitSrc='keine Straße erkannt';return}
+ const w=el.find(e=>e.tags.maxspeed)||el[0];const p=parseLimit(w.tags,country);limit=p.v;limitSrc=p.src;
+}
+async function fetchCountry(){const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=3&lat=${lat}&lon=${lon}`,{headers:{'Accept-Language':'de'}});const j=await r.json();country=(j.address?.country_code||'').toUpperCase()||null}
+async function fetchFuel(){
+ const j=await ov(`[out:json][timeout:15];node(around:5000,${lat},${lon})["amenity"="fuel"];out body 25;`);
+ fuelList=(j.elements||[]).map(e=>({name:e.tags.brand||e.tags.name||'Tankstelle',d:hav(lat,lon,e.lat,e.lon)/1000})).sort((a,b)=>a.d-b.d).slice(0,5);
+}
+async function fetchWeather(){
+ const u=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code,wind_gusts_10m&hourly=precipitation_probability&timezone=auto&forecast_days=2`;
+ const j=await (await fetch(u)).json();
+ const idx=Math.max(0,j.hourly.time.findIndex(t=>t>=j.current.time));
+ wx={cur:j.current,pp:j.hourly.precipitation_probability.slice(idx,idx+6)};
+}
+// DWD-Warnungen: Datei ist in JS eingepackt (warnWetter.loadWarnings(...)), daher Klammer entfernen.
+async function fetchDwd(){
+ if(!S.global.src.dwd||!S.global.warncell)return;
+ const t=await (await fetch('https://www.dwd.de/DWD/warnungen/warnapp/json/warnings.json')).text();
+ const m=t.match(/loadWarnings\(([\s\S]*)\);?\s*$/);if(!m)throw new Error('dwd format');
+ const j=JSON.parse(m[1]);warn=(j.warnings?.[S.global.warncell])||[];
+}
+// Schalter und Intervalle: Abruf nur, wenn Quelle an ist und Intervall abgelaufen
+function due(key,minutes){const last=S.last[key]||0;return Date.now()-last>minutes*60000}
+function mark(key){S.last[key]=Date.now();save()}
+function maybeFetch(){
+ if(S.global.sparmodus)return;
+ if(!country&&due('country',60*24)){mark('country');fetchCountry().catch(()=>{})}
+ if(lastLimitPos==null||hav(lastLimitPos.lat,lastLimitPos.lon,lat,lon)>300){lastLimitPos={lat,lon};fetchLimit().then(renderAll).catch(()=>{})}
+ if(S.global.src.fuel&&due('fuel',S.global.iv.fuel)&&(!fuelPos||hav(fuelPos.lat,fuelPos.lon,lat,lon)>1000)){mark('fuel');fuelPos={lat,lon};fetchFuel().then(renderAll).catch(()=>{})}
+ if(S.global.src.weather&&due('wx',S.global.iv.weather)&&(!wxPos||hav(wxPos.lat,wxPos.lon,lat,lon)>5000)){mark('wx');wxPos={lat,lon};fetchWeather().then(renderAll).catch(()=>{})}
+ if(S.global.src.dwd&&S.global.warncell&&due('dwd',S.global.iv.dwd)){mark('dwd');fetchDwd().then(renderAll).catch(()=>{})}
+}
+
+function onPos(p){
+ const c=p.coords,t=p.timestamp;
+ lat=c.latitude;lon=c.longitude;
+ let v=(c.speed!=null&&c.speed>=0)?c.speed*3.6:null,acc=null;
+ if(lastPos){
+  const dt=(t-lastPos.t)/1000,d=hav(lastPos.lat,lastPos.lon,lat,lon);
+  if(c.accuracy<50&&d>3){S.trip.total+=d/1000;S.trip.trip+=d/1000;S.day.dist+=d/1000}
+  if(v==null&&dt>0)v=(d/dt)*3.6;
+  if(dt>0&&v!=null&&lastPos.v!=null)acc=(v-lastPos.v)/3.6/dt;
+ }
+ if(v==null)v=0;
+ const today=new Date().toDateString();
+ if(S.day.d!==today)S.day={d:today,max:0,mt:0,dist:0};
+ if(c.accuracy<50&&v<250&&v>S.day.max)S.day.max=v;
+ if(lastPos&&v>=3)S.day.mt+=Math.min(t-lastPos.t,60000);
+ if(v<3){zeroT=t;zeroRes=null}
+ if(zeroT&&v>=100&&zeroRes==null)zeroRes=(t-zeroT)/1000;
+ if(acc!=null)accel=acc;
+ lastPos={lat,lon,t,v};speedKmh=v;
+ if(c.heading!=null&&!isNaN(c.heading))heading=c.heading;
+ save();renderAll();maybeFetch();
+}
+function onErr(){$('#b-speed').innerHTML='<div class="small">GPS nicht verfügbar – Standortzugriff erlauben</div>'}
+if(navigator.geolocation)navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:0});
+else onErr();
+window.addEventListener('devicemotion',e=>{const a=e.acceleration;if(a)gForce=Math.hypot(a.x||0,a.y||0,a.z||0)/9.81});
+const dor=e=>{if(e.alpha!=null){compassDev=(360-e.alpha)%360;renderCompass()}};
+window.addEventListener('deviceorientationabsolute',dor);window.addEventListener('deviceorientation',dor);
+
+// Menü
+function buildPanel(){
+ const s=S.global.src,iv=S.global.iv;
+ let h=`<div class="row"><b>Einstellungen</b><button id="close">✕</button></div><h3>Anzeigen</h3>`;
+ WIDGETS.forEach(w=>{const c=S.widgets[w.id];h+=`<div class="row"><label><input type="checkbox" data-w="${w.id}" data-k="on" ${c.on?'checked':''}> ${w.name}</label><input type="color" data-w="${w.id}" data-k="color" value="${c.color}"><input type="range" min="0.6" max="1.8" step="0.05" value="${c.scale}" data-w="${w.id}" data-k="scale" style="width:90px"></div>`});
+ h+=`<h3>Heute</h3>
+ <div class="small">Höchstwert: ${Math.round(S.day.max)} km/h · Ø bewegt: ${S.day.mt>0?Math.round(S.day.dist/(S.day.mt/3600000)):0} km/h · Strecke: ${S.day.dist.toFixed(1)} km</div>
+ <h3>Datenquellen (Abruf nur im Intervall)</h3>
+ <div class="row"><label>Sparmodus (alle Abrufe aus)</label><input type="checkbox" data-g="sparmodus" ${S.global.sparmodus?'checked':''}></div>
+ <div class="row"><label>Wetter (Open-Meteo)</label><input type="checkbox" data-src="weather" ${s.weather?'checked':''}><label>min</label><input type="number" min="10" max="180" data-iv="weather" value="${iv.weather}" style="width:70px"></div>
+ <div class="row"><label>DWD-Warnung</label><input type="checkbox" data-src="dwd" ${s.dwd?'checked':''}><label>min</label><input type="number" min="15" max="180" data-iv="dwd" value="${iv.dwd}" style="width:70px"></div>
+ <div class="row"><label>Tankstellen (OSM)</label><input type="checkbox" data-src="fuel" ${s.fuel?'checked':''}><label>min</label><input type="number" min="10" max="180" data-iv="fuel" value="${iv.fuel}" style="width:70px"></div>
+ <div class="row"><label>Tempolimit (OSM)</label><input type="checkbox" data-src="limit" ${s.limit?'checked':''}></div>
+ <div class="row"><label>DWD-Gemeinde-Kennung (WARNCELLID)</label><input data-g="warncell" value="${esc(S.global.warncell)}" style="width:150px"></div>
+ <h3>Allgemein</h3>
+ <div class="row"><label>Analoger Tacho</label><input type="checkbox" data-g="analog" ${S.global.analog?'checked':''}></div>
+ <div class="row"><label>Bildschirm anlassen</label><input type="checkbox" data-g="awake" ${S.global.awake?'checked':''}></div>
+ <div class="row"><label>Drehung sperren</label><select data-g="orient"><option value="off" ${S.global.orient==='off'?'selected':''}>aus</option><option value="portrait" ${S.global.orient==='portrait'?'selected':''}>Hochformat</option><option value="landscape" ${S.global.orient==='landscape'?'selected':''}>Querformat</option></select></div>
+ <div class="row"><label>Toleranz km/h</label><input type="number" min="0" max="30" data-g="tol" value="${S.global.tol}" style="width:70px"></div>
+ <h3>Eigene Anzeige</h3>
+ <textarea data-g="tpl" rows="3" style="width:100%">${esc(S.global.tpl)}</textarea>
+ <div class="small">Platzhalter: {speed} {limit} {temp} {km} {trip} {time}</div>
+ <h3>Stau-Meldung</h3>
+ <div class="row"><input id="rep" placeholder="z. B. Stau A7 Ausfahrt 12" style="flex:1"><button id="addrep">+</button></div>
+ <h3>Daten & Sensoren</h3>
+ <div class="row"><button id="sens">Bewegungssensor aktivieren</button><button id="rtrip">Tagesstrecke 0</button></div>
+ <div class="row"><button id="reset">Alles zurücksetzen</button></div>
+ <p class="small">Blitzer-Warnungen sind nicht enthalten: Warnungen vor Geschwindigkeitsmessungen sind in Deutschland verboten.</p>`;
+ $('#panel').innerHTML=h;
+}
+buildPanel();
+$('#open').onclick=()=>{buildPanel();$('#menu').classList.add('open')};
+$('#menu').addEventListener('click',e=>{if(e.target.id==='menu')$('#menu').classList.remove('open')});
+$('#panel').addEventListener('input',e=>{const t=e.target;
+ if(t.dataset.w){const c=S.widgets[t.dataset.w],k=t.dataset.k;c[k]=t.type==='checkbox'?t.checked:(k==='scale'?+t.value:t.value)}
+ if(t.dataset.g){const k=t.dataset.g;S.global[k]=t.type==='checkbox'?t.checked:(t.type==='number'?+t.value:t.value)}
+ if(t.dataset.src){S.global.src[t.dataset.src]=t.checked}
+ if(t.dataset.iv){S.global.iv[t.dataset.iv]=+t.value}
+ save();applyCfg();wake();applyOrient();renderAll();
+});
+$('#panel').addEventListener('click',async e=>{const id=e.target.id;
+ if(id==='close')$('#menu').classList.remove('open');
+ if(id==='addrep'){const v=$('#rep').value.trim();if(v){S.reports.unshift({t:Date.now(),txt:v});S.reports=S.reports.slice(0,20);save();$('#rep').value='';renderAll()}}
+ if(id==='rtrip'){S.trip.trip=0;save();renderAll()}
+ if(id==='sens'){try{if(window.DeviceMotionEvent?.requestPermission)await DeviceMotionEvent.requestPermission();if(window.DeviceOrientationEvent?.requestPermission)await DeviceOrientationEvent.requestPermission()}catch(_){}}
+ if(id==='reset'&&confirm('Alle Einstellungen und Strecken löschen?')){try{localStorage.removeItem('gpsdash')}catch(_){}location.reload()}
+});
+
+applyCfg();renderAll();wake();applyOrient();
+setInterval(renderCustom,1000);
+</script>
+</body>
+</html>
