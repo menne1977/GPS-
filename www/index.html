@@ -30,6 +30,10 @@ li.nav{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touc
 #scan{display:none;position:fixed;top:0;left:0;right:0;height:5px;z-index:11;background:linear-gradient(90deg,transparent,#ff1a1a,transparent);background-size:30% 100%;background-repeat:no-repeat;animation:scan 1.4s ease-in-out infinite alternate}
 @keyframes scan{from{background-position:0 0}to{background-position:100% 0}}
 #toast{display:none;position:fixed;left:8px;right:8px;bottom:12px;z-index:13;background:rgba(20,27,36,.95);border:1px solid #ff2a2a;border-radius:10px;padding:10px;font-size:15px}
+label.sc{font-size:12px;color:var(--mut);margin-left:8px;white-space:nowrap}
+.scr{max-height:230px;overflow-y:auto;width:100%;touch-action:pan-y;-webkit-overflow-scrolling:touch}
+.scr::-webkit-scrollbar{width:4px}
+.scr::-webkit-scrollbar-thumb{background:#3a4a5c;border-radius:2px}
 button.rf{margin-top:6px;padding:6px 12px;font-size:13px}
 #open{position:fixed;top:6px;right:6px;z-index:5;background:#22303f;color:var(--txt);border:0;border-radius:8px;padding:6px 10px;font-size:18px}
 #menu{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;justify-content:flex-end;z-index:9}
@@ -68,7 +72,7 @@ const TAB={DE:{urban:50,rural:100,motorway:130},AT:{urban:50,rural:100,motorway:
 FR:{urban:50,rural:80,motorway:130},IT:{urban:50,rural:90,motorway:130},NL:{urban:50,rural:80,motorway:100},PL:{urban:50,rural:90,motorway:140}};
 const WX={0:'Sonne',1:'überwiegend sonnig',2:'teils bewölkt',3:'bedeckt',45:'Nebel',48:'Nebel',51:'Niesel',53:'Niesel',55:'Niesel',61:'Regen',63:'Regen',65:'starker Regen',71:'Schnee',73:'Schnee',75:'starker Schnee',80:'Schauer',81:'Schauer',82:'starke Schauer',95:'Gewitter',96:'Gewitter mit Hagel',99:'Gewitter mit Hagel'};
 // Abfrage-Intervalle in Minuten; Datenquellen einzeln schaltbar, Datensparmodus schaltet alle Abrufe ab.
-const DEF={global:{analog:false,awake:true,orient:'off',tol:5,tpl:'{speed} km/h · {temp}°C · Limit {limit}',sparmodus:false,style:'digital',voice:false,wake:true,anrede:'Michael',vpitch:0.7,vrate:0.95,
+const DEF={global:{analog:false,awake:true,orient:'off',tol:5,tpl:'{speed} km/h · {temp}°C · Limit {limit}',sparmodus:false,style:'digital',voice:false,vfx:true,vname:'',scFuel:false,scTraffic:false,wake:true,anrede:'Michael',vpitch:0.7,vrate:0.95,
  src:{weather:true,dwd:true,fuel:true,limit:true,heat:true,sat:true,autobahn:true},iv:{weather:30,dwd:15,fuel:30},fuelKm:5,},
  widgets:{},trip:{total:0,trip:0},day:{d:'',max:0,mt:0,dist:0},reports:[],last:{}};
 WIDGETS.forEach(w=>DEF.widgets[w.id]={on:true,color:'#e8eef5',scale:1});
@@ -112,7 +116,7 @@ function renderSpeed(){
 }
 function renderLimit(){$('#b-limit').innerHTML=`<div class="big">${limit??'–'}</div><div class="unit">km/h</div><div class="small">${esc(roadType||(limit==null?limitSrc:''))}</div>${errHtml('limit')}`}
 function renderAccel(){$('#b-accel').innerHTML=`<div class="big">${accel==null?'–':accel.toFixed(1)}</div><div class="unit">m/s² (GPS)</div><div class="small">0–100: ${zeroRes?zeroRes.toFixed(1)+' s':'–'} · Sensor: ${gForce.toFixed(2)} g</div>`}
-function setHtml(el,h){if(el._h!==h){el._h=h;el.innerHTML=h}}
+function setHtml(el,h){if(el._h===h)return;const o=el.querySelector('.scr'),top=o?o.scrollTop:0;el._h=h;el.innerHTML=h;if(top){const n=el.querySelector('.scr');if(n)n.scrollTop=top}}
 function renderTrip(){setHtml($('#b-trip'),`<div class="big">${S.trip.trip.toFixed(1)}</div><div class="unit">km Tagesstrecke</div><div class="small">Gesamt ${S.trip.total.toFixed(0)} km</div><button id="rtrip2" style="margin-top:6px">Auf 0 setzen</button>`)}
 function renderDay(){
  const avg=S.day.mt>0?Math.round(S.day.dist/(S.day.mt/3600000)):0;
@@ -173,16 +177,16 @@ function renderWarn(){
 }
 // Nur neu zeichnen, wenn sich der Inhalt ändert (sonst bricht langes Drücken bei jedem GPS-Update ab)
 let fuelHtml='';
-function setFuel(h){if(h===fuelHtml)return;fuelHtml=h;$('#b-fuel').innerHTML=h}
+function setFuel(h){setHtml($('#b-fuel'),h)}
 function fuelSorted(){
  const km=Math.min(100,Math.max(1,+S.global.fuelKm||5));
- return fuelList.map(f=>({...f,d:lat!=null?hav(lat,lon,f.la,f.lo)/1000:f.d})).filter(f=>f.d<=km+5).sort((a,b)=>a.d-b.d).slice(0,6);
+ return fuelList.map(f=>({...f,d:lat!=null?hav(lat,lon,f.la,f.lo)/1000:f.d})).filter(f=>f.d<=km+5).sort((a,b)=>a.d-b.d).slice(0,S.global.scFuel?40:6);
 }
 function renderFuel(){
  if(!S.global.src.fuel){setFuel('<div class="small">Tankstellen aus (Schalter)</div>');return}
  const L=fuelSorted();
- const body=L.length?`<ul class="list">${L.map((f,i)=>`<li class="nav" data-i="${i}"><span>${esc(f.name)}</span><span>${f.d.toFixed(1)} km</span></li>`).join('')}</ul><div class="small">Preise nicht enthalten · Umkreis ${S.global.fuelKm} km · gedrückt halten = navigieren</div>${errHtml('fuel')}`:errs.fuel?errHtml('fuel'):busy.fuel?'':`<div class="small">Keine Tankstelle im Umkreis von ${S.global.fuelKm} km</div>`;
- setFuel(body+standHtml('fuel')+rfBtn('fuel'));
+ const body=L.length?`<div class="${S.global.scFuel?'scr':''}"><ul class="list">${L.map((f,i)=>`<li class="nav" data-i="${i}"><span>${esc(f.name)}</span><span>${f.d.toFixed(1)} km</span></li>`).join('')}</ul></div><div class="small">Preise nicht enthalten · Umkreis ${S.global.fuelKm} km · gedrückt halten = navigieren</div>${errHtml('fuel')}`:errs.fuel?errHtml('fuel'):busy.fuel?'':`<div class="small">Keine Tankstelle im Umkreis von ${S.global.fuelKm} km</div>`;
+ setFuel(body+standHtml('fuel')+rfBtn('fuel')+scBox('scFuel'));
 }
 // Autobahn-Meldungen: Autobahnen im Umkreis von 30 km (OSM), dann je Autobahn die Meldungen der Autobahn-API
 let ab=[],abPos=null;
@@ -194,16 +198,16 @@ async function fetchAutobahn(){
  let fails=0;
  const res=await Promise.all(refs.map(async r=>{
   try{const x=await fetch(`https://verkehr.autobahn.de/o/autobahn/${r}/services/warning`);if(!x.ok)throw new Error('HTTP '+x.status);
-   const w=await x.json();return (w.warning||[]).slice(0,5).map(y=>({road:r,title:y.title||y.subtitle||'Meldung'}))}
+   const w=await x.json();return (w.warning||[]).slice(0,15).map(y=>({road:r,title:y.title||y.subtitle||'Meldung'}))}
   catch(e){fails++;return []}
  }));
  if(refs.length&&fails===refs.length)throw new Error('Autobahn-API nicht erreichbar');
  ab=res.flat();
 }
 function renderTraffic(){
- const abHtml=!S.global.src.autobahn?'<div class="small">Autobahn-Meldungen aus</div>':ab.length?`<ul class="list">${ab.slice(0,5).map(x=>`<li><span>${esc(x.road)}</span><span>${esc(x.title)}</span></li>`).join('')}</ul><div class="small">Quelle: Autobahn GmbH</div>`:errs.ab?errHtml('ab'):busy.ab?'':'<div class="small">Keine Autobahn-Meldung im Umkreis von 30 km</div>';
- const rep=S.reports.length?`<ul class="list">${S.reports.slice(0,3).map(r=>`<li><span>${esc(r.txt)}</span><span>${new Date(r.t).toTimeString().slice(0,5)}</span></li>`).join('')}</ul>`:'';
- setHtml($('#b-traffic'),abHtml+(ab.length?errHtml('ab'):'')+(S.global.src.autobahn?standHtml('ab')+rfBtn('ab'):'')+rep);
+ const abHtml=!S.global.src.autobahn?'<div class="small">Autobahn-Meldungen aus</div>':ab.length?`<div class="${S.global.scTraffic?'scr':''}"><ul class="list">${ab.slice(0,S.global.scTraffic?40:5).map(x=>`<li><span>${esc(x.road)}</span><span>${esc(x.title)}</span></li>`).join('')}</ul></div><div class="small">Quelle: Autobahn GmbH</div>`:errs.ab?errHtml('ab'):busy.ab?'':'<div class="small">Keine Autobahn-Meldung im Umkreis von 30 km</div>';
+ const rep=S.reports.length?`<ul class="list">${S.reports.slice(0,S.global.scTraffic?20:3).map(r=>`<li><span>${esc(r.txt)}</span><span>${new Date(r.t).toTimeString().slice(0,5)}</span></li>`).join('')}</ul>`:'';
+ setHtml($('#b-traffic'),abHtml+(ab.length?errHtml('ab'):'')+(S.global.src.autobahn?standHtml('ab')+rfBtn('ab'):'')+scBox('scTraffic')+rep);
 }
 function renderCustom(){
  const vals={speed:Math.round(speedKmh),limit:limit??'–',temp:wx?Math.round(wx.cur.temperature_2m):'–',km:S.trip.total.toFixed(1),trip:S.trip.trip.toFixed(1),time:new Date().toTimeString().slice(0,5)};
@@ -335,13 +339,13 @@ function cockpit(v){
 
 // ===== Sprachassistent (Mikrofon + Sprachausgabe); in der APK über das Plugin "Voice" =====
 const Voice=window.Capacitor?.Plugins?.Voice;
-let voiceOn=false,voiceState={listening:false,speaking:false},wr=null;
+let voiceLast='aus',voiceList=[],voiceOn=false,voiceState={listening:false,speaking:false},wr=null;
 const WR=window.SpeechRecognition||window.webkitSpeechRecognition;
 const de=(x,d=1)=>(Math.round(x*10**d)/10**d).toFixed(d).replace('.',',').replace(/,0+$/,'');
 function toast(t,ms=7000){const el=$('#toast');el.textContent=t;el.style.display='block';clearTimeout(el._t);el._t=setTimeout(()=>{el.style.display='none'},ms)}
 function say(t){
  toast('KITT: '+t);
- if(Voice)Voice.speak({text:t,pitch:+S.global.vpitch,rate:+S.global.vrate}).catch(()=>{});
+ if(Voice)Voice.speak({text:t,pitch:+S.global.vpitch,rate:+S.global.vrate,voice:S.global.vname||'',fx:!!S.global.vfx}).catch(()=>{});
  else if('speechSynthesis' in window){const u=new SpeechSynthesisUtterance(t);u.lang='de-DE';u.pitch=+S.global.vpitch;u.rate=+S.global.vrate;speechSynthesis.cancel();speechSynthesis.speak(u)}
 }
 function webListen(on){
@@ -477,8 +481,8 @@ async function fetchLimit(){
 async function fetchCountry(){const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=3&lat=${lat}&lon=${lon}`,{headers:{'Accept-Language':'de'}});const j=await r.json();country=(j.address?.country_code||'').toUpperCase()||null}
 async function fetchFuel(){
  const km=Math.min(100,Math.max(1,+S.global.fuelKm||5));
- const j=await ov(`[out:json][timeout:30];node(around:${km*1000},${lat},${lon})["amenity"="fuel"];out body 60;`,1);
- fuelList=(j.elements||[]).map(e=>({name:e.tags.brand||e.tags.name||'Tankstelle',la:e.lat,lo:e.lon,d:hav(lat,lon,e.lat,e.lon)/1000})).sort((a,b)=>a.d-b.d).slice(0,6);
+ const j=await ov(`[out:json][timeout:30];node(around:${km*1000},${lat},${lon})["amenity"="fuel"];out body 200;`,1);
+ fuelList=(j.elements||[]).map(e=>({name:e.tags.brand||e.tags.name||'Tankstelle',la:e.lat,lo:e.lon,d:hav(lat,lon,e.lat,e.lon)/1000})).sort((a,b)=>a.d-b.d).slice(0,40);
 }
 async function fetchWeather(){
  const u=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code,wind_gusts_10m&hourly=precipitation_probability&timezone=auto&forecast_days=2`;
@@ -536,6 +540,7 @@ function run(key,iv,fn,onFail){
  });
 }
 function standHtml(key){const t=S.cache.t[key];return `<div class="small">${busy[key]?'wird abgefragt…':(t?'Stand '+new Date(t).toTimeString().slice(0,5):'')}</div>`}
+function scBox(k){return `<label class="sc"><input type="checkbox" data-sc="${k}" ${S.global[k]?'checked':''}> Scrollen</label>`}
 function rfBtn(key){return `<button class="rf" data-rf="${key}">Aktualisieren</button>`}
 // Sofort-Abfrage: setzt die Sperren zurück und startet die Abrufe ohne Wartezeit
 function refreshNow(keys){
@@ -628,9 +633,12 @@ function buildPanel(){
  <div class="row"><label>Mikrofon an</label><input type="checkbox" id="vmic" ${voiceOn?'checked':''}></div>
  <div class="row"><label>Aktivierungswort „KITT“ nötig</label><input type="checkbox" data-g="wake" ${S.global.wake?'checked':''}></div>
  <div class="row"><label>Anrede</label><input data-g="anrede" value="${esc(S.global.anrede)}" style="width:120px"></div>
+ <div class="small" id="vstat">Status: ${esc(voiceLast)}</div>
+ <div class="row"><label>Stimme</label><select data-g="vname" style="max-width:190px"><option value="">Standard</option>${voiceList.map(v=>`<option value="${esc(v.name)}" ${S.global.vname===v.name?'selected':''}>${esc(v.name)}${v.network?' (online)':''}</option>`).join('')}</select></div>
+ <div class="row"><label>Roboter-Effekt (KITT-Klang)</label><input type="checkbox" data-g="vfx" ${S.global.vfx?'checked':''}></div>
  <div class="row"><label>Tonhöhe</label><input type="range" min="0.4" max="1.6" step="0.05" data-g="vpitch" value="${S.global.vpitch}" style="width:140px"></div>
  <div class="row"><label>Sprechtempo</label><input type="range" min="0.6" max="1.5" step="0.05" data-g="vrate" value="${S.global.vrate}" style="width:140px"></div>
- <div class="row"><button id="vtest">Stimme testen</button><button id="refall">Alles jetzt aktualisieren</button></div>
+ <div class="row"><button id="vtest">Stimme testen</button><button id="vkitt">KITT-Einstellung</button><button id="refall">Alles jetzt aktualisieren</button></div>
  <div class="small">Beispiele: „KITT, wie schnell fahre ich?“ – auch Beschleunigung, Bremsen, Höhe, Wetter, Tankstelle, Stau, Warnung, Tagesstrecke, Satelliten, Richtung, Uhrzeit, Hilfe. Die Originalstimme der Serie lässt sich nicht nachbilden; genutzt wird die deutsche Android-Stimme, Tonhöhe und Tempo sind einstellbar.</div>
  <h3>Daten & Sensoren</h3>
  <div class="row"><button id="sens">Bewegungssensor aktivieren</button><button id="rtrip">Tagesstrecke 0</button></div>
@@ -654,6 +662,7 @@ $('#panel').addEventListener('click',async e=>{const id=e.target.id;
  if(id==='close')$('#menu').classList.remove('open');
  if(id==='addrep'){const v=$('#rep').value.trim();if(v){S.reports.unshift({t:Date.now(),txt:v});S.reports=S.reports.slice(0,20);save();$('#rep').value='';renderAll()}}
  if(id==='rtrip'){S.trip.trip=0;save();renderAll()}
+ if(id==='vkitt'){S.global.vpitch=0.65;S.global.vrate=0.9;S.global.vfx=true;save();buildPanel();say(`${S.global.anrede||'Michael'}, KITT-Einstellung aktiv.`)}
  if(id==='vtest')say(`${S.global.anrede||'Michael'}, hier ist KITT. Alle Systeme laufen.`);
  if(id==='refall'){lastLimitPos=null;refreshNow(['fuel','ab','wx','dwd','heat']);$('#menu').classList.remove('open')}
  if(id==='sens'){try{if(window.DeviceMotionEvent?.requestPermission)await DeviceMotionEvent.requestPermission();if(window.DeviceOrientationEvent?.requestPermission)await DeviceOrientationEvent.requestPermission()}catch(_){}}
@@ -687,8 +696,9 @@ fuelBox.addEventListener('pointermove',e=>{if(navT&&navStart&&Math.hypot(e.clien
 
 $('#b-trip').addEventListener('click',e=>{if(e.target.id==='rtrip2'&&confirm('Tageskilometer auf 0 setzen?')){S.trip.trip=0;save();renderTrip()}});
 fuelList=S.cache.fuel||[];ab=S.cache.ab||[];
+['#b-fuel','#b-traffic'].forEach(id=>$(id).addEventListener('change',e=>{const k=e.target.dataset&&e.target.dataset.sc;if(k){S.global[k]=e.target.checked;save();renderAll()}}));
 ['#b-fuel','#b-traffic'].forEach(id=>$(id).addEventListener('click',e=>{const k=e.target.dataset&&e.target.dataset.rf;if(k)refreshNow(k)}));
-if(Voice){Voice.addListener('speech',d=>heard(d.text));Voice.addListener('state',d=>{voiceState=d;if(d.error)toast('Mikrofon: '+d.error,3000);paintMic()})}
+if(Voice){Voice.addListener('speech',d=>heard(d.text));Voice.addListener('state',d=>{voiceState=d;voiceLast=d.error||(d.speaking?'spricht':d.listening?'hört zu':'bereit');if(d.error)toast('Mikrofon: '+d.error,5000);paintMic();const el=$('#vstat');if(el)el.textContent='Status: '+voiceLast});Voice.voices().then(r=>{voiceList=r.voices||[]}).catch(()=>{})}
 $('#mic').onclick=()=>setVoice(!voiceOn);
 document.addEventListener('visibilitychange',()=>{if(!voiceOn||!Voice)return;if(document.visibilityState==='hidden')Voice.stopListening().catch(()=>{});else Voice.listen().catch(()=>{})});
 if(S.global.voice)setVoice(true);
