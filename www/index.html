@@ -44,6 +44,8 @@ const WIDGETS=[
 {id:'compass',name:'Kompass',base:150},
 {id:'weather',name:'Wetter',base:230},
 {id:'warn',name:'DWD-Warnung',base:230},
+{id:'heat',name:'Hitzewarnung',base:200},
+{id:'sat',name:'GPS-Satelliten',base:260},
 {id:'fuel',name:'Tankstellen (ohne Preise)',base:280},
 {id:'traffic',name:'Stau-Meldungen',base:260},
 {id:'custom',name:'Eigene Anzeige',base:220}];
@@ -53,7 +55,7 @@ FR:{urban:50,rural:80,motorway:130},IT:{urban:50,rural:90,motorway:130},NL:{urba
 const WX={0:'Sonne',1:'überwiegend sonnig',2:'teils bewölkt',3:'bedeckt',45:'Nebel',48:'Nebel',51:'Niesel',53:'Niesel',55:'Niesel',61:'Regen',63:'Regen',65:'starker Regen',71:'Schnee',73:'Schnee',75:'starker Schnee',80:'Schauer',81:'Schauer',82:'starke Schauer',95:'Gewitter',96:'Gewitter mit Hagel',99:'Gewitter mit Hagel'};
 // Abfrage-Intervalle in Minuten; Datenquellen einzeln schaltbar, Datensparmodus schaltet alle Abrufe ab.
 const DEF={global:{analog:false,awake:true,orient:'off',tol:5,tpl:'{speed} km/h · {temp}°C · Limit {limit}',sparmodus:false,
- src:{weather:true,dwd:true,fuel:true,limit:true},iv:{weather:30,dwd:15,fuel:30},warncell:'',},
+ src:{weather:true,dwd:true,fuel:true,limit:true,heat:true,sat:true},iv:{weather:30,dwd:15,fuel:30},warncell:'',gemeinde:'',},
  widgets:{},trip:{total:0,trip:0},day:{d:'',max:0,mt:0,dist:0},reports:[],last:{}};
 WIDGETS.forEach(w=>DEF.widgets[w.id]={on:true,color:'#e8eef5',scale:1});
 function load(){try{const x=JSON.parse(localStorage.getItem('gpsdash')||'null');if(x){const d=structuredClone(DEF);return Object.assign(d,x,{global:Object.assign(d.global,x.global,{src:Object.assign(d.global.src,x.global?.src||{}),iv:Object.assign(d.global.iv,x.global?.iv||{})}),widgets:Object.assign(d.widgets,x.widgets),trip:Object.assign(d.trip,x.trip),day:Object.assign(d.day,x.day)})}}catch(e){}return structuredClone(DEF)}
@@ -125,7 +127,48 @@ function renderCustom(){
  const vals={speed:Math.round(speedKmh),limit:limit??'–',temp:wx?Math.round(wx.cur.temperature_2m):'–',km:S.trip.total.toFixed(1),trip:S.trip.trip.toFixed(1),time:new Date().toTimeString().slice(0,5)};
  $('#b-custom').innerHTML=`<div class="big" style="font-size:calc(var(--s,1)*26px)">${esc(S.global.tpl).replace(/\{(\w+)\}/g,(m,k)=>vals[k]??m)}</div>`;
 }
-function renderAll(){renderSpeed();renderLimit();renderAccel();renderTrip();renderDay();renderCompass();renderWeather();renderWarn();renderFuel();renderTraffic();renderCustom()}
+// Hitzewarnungen: DWD-WFS (maps.dwd.de), Filter nach Gemeindename; EC_II 247 = stark, 248 = extrem
+let heat=null;
+function renderHeat(){
+ const el=$('#b-heat');
+ if(!S.global.src.heat){el.innerHTML='<div class="small">Hitze aus (Schalter)</div>';return}
+ if(!S.global.gemeinde){el.innerHTML='<div class="small">Gemeindename im Menü eintragen</div>';return}
+ if(!heat){el.innerHTML='<div class="small">Lädt…</div>';return}
+ const al=$('#al-heat');al.style.display=heat.length?'block':'none';if(heat.length)al.textContent='HITZEWARNUNG';
+ el.innerHTML=heat.length?heat.slice(0,3).map(f=>`<div class="small">${String(f.EC_II)==='248'?'Extreme Hitze':'Starke Hitze'} bis ${esc(f.EXPIRES||'?')}</div>`).join(''):'<div class="small">Keine Hitzewarnung</div><div class="small">Quelle: DWD</div>';
+}
+async function fetchHeat(){
+ if(!S.global.src.heat||!S.global.gemeinde)return;
+ const cql=encodeURIComponent(`NAME LIKE '${S.global.gemeinde.replace(/'/g,"''")}' and EC_II IN(247,248)`);
+ const u=`https://maps.dwd.de/geoserver/dwd/ows?service=WFS&version=2.0.0&request=GetFeature&typeName=dwd:Warnungen_Gemeinden&outputFormat=application/json&CQL_FILTER=${cql}`;
+ const j=await (await fetch(u)).json();
+ heat=(j.features||[]).map(f=>f.properties);
+}
+// GPS-Satelliten: nur in der APK (eigenes Capacitor-Plugin "Gnss"), liefert Satellitenzahl und C/N0 je Satellit
+const Gnss=window.Capacitor?.Plugins?.Gnss;
+const CONST={1:'GPS',2:'SBAS',3:'GLONASS',4:'QZSS',5:'BeiDou',6:'Galileo',7:'IRNSS'};
+let sats=null,satOn=false;
+function renderSat(){
+ const el=$('#b-sat');
+ if(!S.global.src.sat){el.innerHTML='<div class="small">Satelliten aus (Schalter)</div>';return}
+ if(!Gnss){el.innerHTML='<div class="small">Nur in der APK verfügbar</div>';return}
+ if(!sats){el.innerHTML='<div class="small">Warte auf Satelliten…</div>';return}
+ const used=sats.sats.filter(s=>s.used);
+ const avg=used.length?used.reduce((a,s)=>a+s.cn0,0)/used.length:0;
+ const q=used.length===0?'kein Fix':avg>=30?'gut':avg>=20?'mittel':'schwach';
+ el.innerHTML=`<div class="big" style="font-size:calc(var(--s,1)*40px)">${used.length}/${sats.visible}</div><div class="unit">im Fix / sichtbar</div><div class="small">Signal ${q} · Ø ${avg.toFixed(0)} dB-Hz</div><ul class="list">${sats.sats.slice().sort((a,b)=>b.cn0-a.cn0).slice(0,4).map(s=>`<li><span>${esc(CONST[s.constellation]||'GNSS')} ${s.svid}</span><span>${Number(s.cn0).toFixed(0)} dB-Hz${s.used?' ✓':''}</span></li>`).join('')}</ul>`;
+}
+function startSat(){
+ if(!Gnss||satOn||!S.global.src.sat)return;
+ satOn=true;
+ Gnss.addListener('gnss',d=>{sats=d;renderSat()});
+ Gnss.start().catch(()=>{});
+}
+function stopSat(){
+ if(!Gnss||!satOn)return;
+ satOn=false;sats=null;Gnss.stop().catch(()=>{});renderSat();
+}
+function renderAll(){renderSpeed();renderLimit();renderAccel();renderTrip();renderDay();renderCompass();renderWeather();renderWarn();renderHeat();renderSat();renderFuel();renderTraffic();renderCustom()}
 
 // Abrufe (nur mit Schalter an, im Intervall)
 async function ov(q){const r=await fetch('https://overpass-api.de/api/interpreter?data='+encodeURIComponent(q));if(!r.ok)throw new Error('overpass');return r.json()}
@@ -179,6 +222,7 @@ function maybeFetch(){
  if(S.global.src.fuel&&due('fuel',S.global.iv.fuel)&&(!fuelPos||hav(fuelPos.lat,fuelPos.lon,lat,lon)>1000)){mark('fuel');fuelPos={lat,lon};fetchFuel().then(renderAll).catch(()=>{})}
  if(S.global.src.weather&&due('wx',S.global.iv.weather)&&(!wxPos||hav(wxPos.lat,wxPos.lon,lat,lon)>5000)){mark('wx');wxPos={lat,lon};fetchWeather().then(renderAll).catch(()=>{})}
  if(S.global.src.dwd&&S.global.warncell&&due('dwd',S.global.iv.dwd)){mark('dwd');fetchDwd().then(renderAll).catch(()=>{})}
+ if(S.global.src.heat&&S.global.gemeinde&&due('heat',S.global.iv.dwd)){mark('heat');fetchHeat().then(renderAll).catch(()=>{})}
 }
 
 function onPos(p){
@@ -222,6 +266,9 @@ function buildPanel(){
  <div class="row"><label>Wetter (Open-Meteo)</label><input type="checkbox" data-src="weather" ${s.weather?'checked':''}><label>min</label><input type="number" min="10" max="180" data-iv="weather" value="${iv.weather}" style="width:70px"></div>
  <div class="row"><label>DWD-Warnung</label><input type="checkbox" data-src="dwd" ${s.dwd?'checked':''}><label>min</label><input type="number" min="15" max="180" data-iv="dwd" value="${iv.dwd}" style="width:70px"></div>
  <div class="row"><label>Tankstellen (OSM)</label><input type="checkbox" data-src="fuel" ${s.fuel?'checked':''}><label>min</label><input type="number" min="10" max="180" data-iv="fuel" value="${iv.fuel}" style="width:70px"></div>
+ <div class="row"><label>Hitzewarnung (DWD)</label><input type="checkbox" data-src="heat" ${s.heat?'checked':''}></div>
+ <div class="row"><label>Gemeindename (exakt, für Hitze)</label><input data-g="gemeinde" value="${esc(S.global.gemeinde)}" style="width:150px"></div>
+ <div class="row"><label>GPS-Satelliten (nur APK)</label><input type="checkbox" data-src="sat" ${s.sat?'checked':''}></div>
  <div class="row"><label>Tempolimit (OSM)</label><input type="checkbox" data-src="limit" ${s.limit?'checked':''}></div>
  <div class="row"><label>DWD-Gemeinde-Kennung (WARNCELLID)</label><input data-g="warncell" value="${esc(S.global.warncell)}" style="width:150px"></div>
  <h3>Allgemein</h3>
@@ -247,6 +294,7 @@ $('#panel').addEventListener('input',e=>{const t=e.target;
  if(t.dataset.w){const c=S.widgets[t.dataset.w],k=t.dataset.k;c[k]=t.type==='checkbox'?t.checked:(k==='scale'?+t.value:t.value)}
  if(t.dataset.g){const k=t.dataset.g;S.global[k]=t.type==='checkbox'?t.checked:(t.type==='number'?+t.value:t.value)}
  if(t.dataset.src){S.global.src[t.dataset.src]=t.checked}
+ if(t.dataset.src==='sat'){t.checked?startSat():stopSat()}
  if(t.dataset.iv){S.global.iv[t.dataset.iv]=+t.value}
  save();applyCfg();wake();applyOrient();renderAll();
 });
@@ -258,7 +306,7 @@ $('#panel').addEventListener('click',async e=>{const id=e.target.id;
  if(id==='reset'&&confirm('Alle Einstellungen und Strecken löschen?')){try{localStorage.removeItem('gpsdash')}catch(_){}location.reload()}
 });
 
-applyCfg();renderAll();wake();applyOrient();
+applyCfg();renderAll();wake();applyOrient();startSat();
 setInterval(renderCustom,1000);
 </script>
 </body>

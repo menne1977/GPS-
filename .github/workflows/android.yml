@@ -30,6 +30,10 @@ jobs:
         run: |
           sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <application#' android/app/src/main/AndroidManifest.xml
 
+      - name: Satelliten-Plugin einfügen
+        run: |
+          cp android-overlay/*.java android/app/src/main/java/de/menne/gps/
+
       - name: Web-Dateien übernehmen
         run: npx cap sync android
 
