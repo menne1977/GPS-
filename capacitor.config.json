@@ -1,0 +1,10 @@
+{
+  "appId": "de.menne.gps",
+  "appName": "GPS",
+  "webDir": "www",
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}
