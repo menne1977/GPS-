@@ -55,7 +55,7 @@ FR:{urban:50,rural:80,motorway:130},IT:{urban:50,rural:90,motorway:130},NL:{urba
 const WX={0:'Sonne',1:'überwiegend sonnig',2:'teils bewölkt',3:'bedeckt',45:'Nebel',48:'Nebel',51:'Niesel',53:'Niesel',55:'Niesel',61:'Regen',63:'Regen',65:'starker Regen',71:'Schnee',73:'Schnee',75:'starker Schnee',80:'Schauer',81:'Schauer',82:'starke Schauer',95:'Gewitter',96:'Gewitter mit Hagel',99:'Gewitter mit Hagel'};
 // Abfrage-Intervalle in Minuten; Datenquellen einzeln schaltbar, Datensparmodus schaltet alle Abrufe ab.
 const DEF={global:{analog:false,awake:true,orient:'off',tol:5,tpl:'{speed} km/h · {temp}°C · Limit {limit}',sparmodus:false,
- src:{weather:true,dwd:true,fuel:true,limit:true,heat:true,sat:true,autobahn:true},iv:{weather:30,dwd:15,fuel:30},warncell:'',gemeinde:'',fuelKm:5,},
+ src:{weather:true,dwd:true,fuel:true,limit:true,heat:true,sat:true,autobahn:true},iv:{weather:30,dwd:15,fuel:30},fuelKm:5,},
  widgets:{},trip:{total:0,trip:0},day:{d:'',max:0,mt:0,dist:0},reports:[],last:{}};
 WIDGETS.forEach(w=>DEF.widgets[w.id]={on:true,color:'#e8eef5',scale:1});
 function load(){try{const x=JSON.parse(localStorage.getItem('gpsdash')||'null');if(x){const d=structuredClone(DEF);return Object.assign(d,x,{global:Object.assign(d.global,x.global,{src:Object.assign(d.global.src,x.global?.src||{}),iv:Object.assign(d.global.iv,x.global?.iv||{})}),widgets:Object.assign(d.widgets,x.widgets),trip:Object.assign(d.trip,x.trip),day:Object.assign(d.day,x.day)})}}catch(e){}return structuredClone(DEF)}
@@ -66,7 +66,7 @@ function hav(a,b,c,d){const R=6371000,r=x=>x*Math.PI/180;const dA=r(c-a),dB=r(d-
 
 // Zustand
 let speedKmh=0,accel=null,zeroRes=null,gForce=0,heading=null,compassDev=null,limit=null,limitSrc='',fuelList=[],wx=null,warn=null,lat=null,lon=null,lastPos=null,zeroT=null;
-let fuelPos=null,wxPos=null,lastLimitPos=null;
+let fuelPos=null,wxPos=null,lastLimitPos=null,area=null,areaPos=null;
 
 WIDGETS.forEach(w=>{const d=document.createElement('div');d.className='w';d.id='w-'+w.id;d.innerHTML=`<div class="alert" id="al-${w.id}"></div><h4>${w.name}</h4><div id="b-${w.id}"></div>`;$('#app').appendChild(d)});
 
@@ -114,10 +114,10 @@ function renderWeather(){
 }
 function renderWarn(){
  if(!S.global.src.dwd){$('#b-warn').innerHTML='<div class="small">DWD aus (Schalter)</div>';return}
- if(!S.global.warncell){$('#b-warn').innerHTML='<div class="small">Gemeinde-Kennung im Menü eintragen</div>';return}
+ if(!area){$('#b-warn').innerHTML='<div class="small">Standort wird ermittelt…</div>';return}
  const list=warn||[];const al=$('#al-warn');
  al.style.display=list.length?'block':'none';if(list.length)al.textContent='AMTLICHE WARNUNG';
- $('#b-warn').innerHTML=list.length?`<ul class="list">${list.slice(0,4).map(w=>`<li><span>${esc(w.event)}</span><span>${esc(w.level)}</span></li>`).join('')}</ul>`:'<div class="small">Keine aktiven Warnungen für diese Gemeinde</div><div class="small">Quelle: DWD</div>';
+ $('#b-warn').innerHTML=list.length?`<ul class="list">${list.slice(0,4).map(w=>`<li><span>${esc(w.event)}</span><span>${esc(w.level)}</span></li>`).join('')}</ul><div class="small">${esc(area.kreis||area.ort)}</div>`:`<div class="small">Keine aktiven Warnungen für ${esc(area.kreis||area.ort)}</div><div class="small">Quelle: DWD</div>`;
 }
 function renderFuel(){
  if(!S.global.src.fuel){$('#b-fuel').innerHTML='<div class="small">Tankstellen aus (Schalter)</div>';return}
@@ -151,14 +151,15 @@ let heat=null;
 function renderHeat(){
  const el=$('#b-heat');
  if(!S.global.src.heat){el.innerHTML='<div class="small">Hitze aus (Schalter)</div>';return}
- if(!S.global.gemeinde){el.innerHTML='<div class="small">Gemeindename im Menü eintragen</div>';return}
+ if(!area){el.innerHTML='<div class="small">Standort wird ermittelt…</div>';return}
  if(!heat){el.innerHTML='<div class="small">Lädt…</div>';return}
  const al=$('#al-heat');al.style.display=heat.length?'block':'none';if(heat.length)al.textContent='HITZEWARNUNG';
  el.innerHTML=heat.length?heat.slice(0,3).map(f=>`<div class="small">${String(f.EC_II)==='248'?'Extreme Hitze':'Starke Hitze'} bis ${esc(f.EXPIRES||'?')}</div>`).join(''):'<div class="small">Keine Hitzewarnung</div><div class="small">Quelle: DWD</div>';
 }
 async function fetchHeat(){
- if(!S.global.src.heat||!S.global.gemeinde)return;
- const cql=encodeURIComponent(`NAME LIKE '${S.global.gemeinde.replace(/'/g,"''")}' and EC_II IN(247,248)`);
+ if(!S.global.src.heat||!area)return;
+ const name=(area.ort||area.kreis||'').replace(/'/g,"''");if(!name)return;
+ const cql=encodeURIComponent(`NAME LIKE '%${name}%' and EC_II IN(247,248)`);
  const u=`https://maps.dwd.de/geoserver/dwd/ows?service=WFS&version=2.0.0&request=GetFeature&typeName=dwd:Warnungen_Gemeinden&outputFormat=application/json&CQL_FILTER=${cql}`;
  const j=await (await fetch(u)).json();
  heat=(j.features||[]).map(f=>f.properties);
@@ -226,11 +227,27 @@ async function fetchWeather(){
  wx={cur:j.current,pp:j.hourly.precipitation_probability.slice(idx,idx+6)};
 }
 // DWD-Warnungen: Datei ist in JS eingepackt (warnWetter.loadWarnings(...)), daher Klammer entfernen.
+// Standort -> Kreis und Ort (Nominatim). Die Warnungsdatei enthält ganz Deutschland, gefiltert wird nach regionName.
+async function fetchArea(){
+ const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&lat=${lat}&lon=${lon}`,{headers:{'Accept-Language':'de'}});
+ const j=await r.json();const a=j.address||{};
+ area={kreis:a.county||'',ort:a.city||a.town||a.village||a.municipality||''};
+}
+const norm=s=>String(s||'').toLowerCase().replace(/\s+/g,' ').trim();
 async function fetchDwd(){
- if(!S.global.src.dwd||!S.global.warncell)return;
+ if(!S.global.src.dwd||!area)return;
  const t=await (await fetch('https://www.dwd.de/DWD/warnungen/warnapp/json/warnings.json')).text();
  const m=t.match(/loadWarnings\(([\s\S]*)\);?\s*$/);if(!m)throw new Error('dwd format');
- const j=JSON.parse(m[1]);warn=(j.warnings?.[S.global.warncell])||[];
+ const j=JSON.parse(m[1]);
+ const names=[area.kreis,area.ort].map(norm).filter(Boolean);
+ const hit=r=>{const n=norm(r.regionName);return !!n&&names.some(x=>n.includes(x)||x.includes(n))};
+ const seen=new Set();warn=[];
+ for(const [k,list] of Object.entries(j.warnings||{})){
+  for(const w of list||[]){
+   const key=k+'|'+w.event+'|'+w.start;
+   if(hit(w)&&(w.end==null||w.end>Date.now())&&!seen.has(key)){seen.add(key);warn.push(w)}
+  }
+ }
 }
 // Schalter und Intervalle: Abruf nur, wenn Quelle an ist und Intervall abgelaufen
 function due(key,minutes){const last=S.last[key]||0;return Date.now()-last>minutes*60000}
@@ -238,11 +255,12 @@ function mark(key){S.last[key]=Date.now();save()}
 function maybeFetch(){
  if(S.global.sparmodus)return;
  if(!country&&due('country',60*24)){mark('country');fetchCountry().catch(()=>{})}
+ if(!areaPos||hav(areaPos.lat,areaPos.lon,lat,lon)>5000){areaPos={lat,lon};fetchArea().then(()=>{S.last.dwd=0;S.last.heat=0;renderAll()}).catch(()=>{})}
  if(lastLimitPos==null||hav(lastLimitPos.lat,lastLimitPos.lon,lat,lon)>300){lastLimitPos={lat,lon};fetchLimit().then(renderAll).catch(()=>{})}
  if(S.global.src.fuel&&due('fuel',S.global.iv.fuel)&&(!fuelPos||hav(fuelPos.lat,fuelPos.lon,lat,lon)>1000)){mark('fuel');fuelPos={lat,lon};fetchFuel().then(renderAll).catch(()=>{})}
  if(S.global.src.weather&&due('wx',S.global.iv.weather)&&(!wxPos||hav(wxPos.lat,wxPos.lon,lat,lon)>5000)){mark('wx');wxPos={lat,lon};fetchWeather().then(renderAll).catch(()=>{})}
- if(S.global.src.dwd&&S.global.warncell&&due('dwd',S.global.iv.dwd)){mark('dwd');fetchDwd().then(renderAll).catch(()=>{})}
- if(S.global.src.heat&&S.global.gemeinde&&due('heat',S.global.iv.dwd)){mark('heat');fetchHeat().then(renderAll).catch(()=>{})}
+ if(S.global.src.dwd&&area&&due('dwd',S.global.iv.dwd)){mark('dwd');fetchDwd().then(renderAll).catch(()=>{})}
+ if(S.global.src.heat&&area&&due('heat',S.global.iv.dwd)){mark('heat');fetchHeat().then(renderAll).catch(()=>{})}
  if(S.global.src.autobahn&&due('ab',S.global.iv.dwd)&&(!abPos||hav(abPos.lat,abPos.lon,lat,lon)>5000)){mark('ab');abPos={lat,lon};fetchAutobahn().then(renderAll).catch(()=>{})}
 }
 
@@ -290,10 +308,8 @@ function buildPanel(){
  <div class="row"><label>Tankstellen-Umkreis km (1–100)</label><input type="number" min="1" max="100" data-g="fuelKm" value="${S.global.fuelKm}" style="width:70px"></div>
  <div class="row"><label>Autobahn-Meldungen (bundesweit)</label><input type="checkbox" data-src="autobahn" ${s.autobahn?'checked':''}></div>
  <div class="row"><label>Hitzewarnung (DWD)</label><input type="checkbox" data-src="heat" ${s.heat?'checked':''}></div>
- <div class="row"><label>Gemeindename (exakt, für Hitze)</label><input data-g="gemeinde" value="${esc(S.global.gemeinde)}" style="width:150px"></div>
  <div class="row"><label>GPS-Satelliten (nur APK)</label><input type="checkbox" data-src="sat" ${s.sat?'checked':''}></div>
  <div class="row"><label>Tempolimit (OSM)</label><input type="checkbox" data-src="limit" ${s.limit?'checked':''}></div>
- <div class="row"><label>DWD-Gemeinde-Kennung (WARNCELLID)</label><input data-g="warncell" value="${esc(S.global.warncell)}" style="width:150px"></div>
  <h3>Allgemein</h3>
  <div class="row"><label>Analoger Tacho</label><input type="checkbox" data-g="analog" ${S.global.analog?'checked':''}></div>
  <div class="row"><label>Bildschirm anlassen</label><input type="checkbox" data-g="awake" ${S.global.awake?'checked':''}></div>
