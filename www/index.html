@@ -343,10 +343,19 @@ let voiceLast='aus',voiceList=[],voiceOn=false,voiceState={listening:false,speak
 const WR=window.SpeechRecognition||window.webkitSpeechRecognition;
 const de=(x,d=1)=>(Math.round(x*10**d)/10**d).toFixed(d).replace('.',',').replace(/,0+$/,'');
 function toast(t,ms=7000){const el=$('#toast');el.textContent=t;el.style.display='block';clearTimeout(el._t);el._t=setTimeout(()=>{el.style.display='none'},ms)}
+let lastSpoke=0;
+function webSay(t){
+ if(!('speechSynthesis' in window))return false;
+ const u=new SpeechSynthesisUtterance(t);u.lang='de-DE';u.pitch=+S.global.vpitch;u.rate=+S.global.vrate;
+ speechSynthesis.cancel();speechSynthesis.speak(u);return true;
+}
 function say(t){
  toast('KITT: '+t);
- if(Voice)Voice.speak({text:t,pitch:+S.global.vpitch,rate:+S.global.vrate,voice:S.global.vname||'',fx:!!S.global.vfx}).catch(()=>{});
- else if('speechSynthesis' in window){const u=new SpeechSynthesisUtterance(t);u.lang='de-DE';u.pitch=+S.global.vpitch;u.rate=+S.global.vrate;speechSynthesis.cancel();speechSynthesis.speak(u)}
+ if(!Voice){webSay(t);return}
+ const t0=Date.now();
+ Voice.speak({text:t,pitch:+S.global.vpitch,rate:+S.global.vrate,voice:S.global.vname||'',fx:!!S.global.vfx}).catch(e=>toast('Sprachausgabe: '+(e&&e.message||e),6000));
+ // Kommt vom Handy kein Ton, wird die Browser-Stimme der App benutzt
+ setTimeout(()=>{if(lastSpoke<t0){toast('Sprachausgabe des Handys bleibt stumm – ich versuche die Ersatzstimme. Prüfen: Android-Einstellungen > Text-zu-Sprache.',8000);webSay(t)}},4500);
 }
 function webListen(on){
  if(!on){if(wr){wr.onend=null;try{wr.stop()}catch(_){}wr=null}return true}
@@ -698,7 +707,7 @@ $('#b-trip').addEventListener('click',e=>{if(e.target.id==='rtrip2'&&confirm('Ta
 fuelList=S.cache.fuel||[];ab=S.cache.ab||[];
 ['#b-fuel','#b-traffic'].forEach(id=>$(id).addEventListener('change',e=>{const k=e.target.dataset&&e.target.dataset.sc;if(k){S.global[k]=e.target.checked;save();renderAll()}}));
 ['#b-fuel','#b-traffic'].forEach(id=>$(id).addEventListener('click',e=>{const k=e.target.dataset&&e.target.dataset.rf;if(k)refreshNow(k)}));
-if(Voice){Voice.addListener('speech',d=>heard(d.text));Voice.addListener('state',d=>{voiceState=d;voiceLast=d.error||(d.speaking?'spricht':d.listening?'hört zu':'bereit');if(d.error)toast('Mikrofon: '+d.error,5000);paintMic();const el=$('#vstat');if(el)el.textContent='Status: '+voiceLast});Voice.voices().then(r=>{voiceList=r.voices||[]}).catch(()=>{})}
+if(Voice){Voice.addListener('speech',d=>heard(d.text));Voice.addListener('spoke',()=>{lastSpoke=Date.now()});Voice.addListener('state',d=>{voiceState=d;voiceLast=d.error||(d.speaking?'spricht':d.listening?'hört zu':'bereit');if(d.error)toast('Mikrofon: '+d.error,5000);paintMic();const el=$('#vstat');if(el)el.textContent='Status: '+voiceLast});Voice.voices().then(r=>{voiceList=r.voices||[]}).catch(()=>{})}
 $('#mic').onclick=()=>setVoice(!voiceOn);
 document.addEventListener('visibilitychange',()=>{if(!voiceOn||!Voice)return;if(document.visibilityState==='hidden')Voice.stopListening().catch(()=>{});else Voice.listen().catch(()=>{})});
 if(S.global.voice)setVoice(true);

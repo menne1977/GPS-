@@ -31,6 +31,9 @@ jobs:
           sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <application#' android/app/src/main/AndroidManifest.xml
           sed -i 's#<application#<queries><intent><action android:name="android.speech.RecognitionService" /></intent><intent><action android:name="android.intent.action.TTS_SERVICE" /></intent></queries>\n    <application#' android/app/src/main/AndroidManifest.xml
 
+      - name: Manifest zur Kontrolle ausgeben
+        run: cat android/app/src/main/AndroidManifest.xml
+
       - name: Android-Plugins einfügen (Satelliten, Sprache)
         run: |
           cp android-overlay/*.java android/app/src/main/java/de/menne/gps/

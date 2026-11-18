@@ -57,6 +57,8 @@ public class VoicePlugin extends Plugin {
     private String pText = "", pVoice = "";
     private float pPitch = 0.7f, pRate = 0.95f;
     private boolean pFx = true;
+    private volatile boolean fxStarted = false;
+    private int speakToken = 0;
 
     // ---------- Mikrofon ----------
     @PluginMethod
@@ -211,11 +213,25 @@ public class VoicePlugin extends Plugin {
             if (tts == null) {
                 tts = new TextToSpeech(getContext(), status -> {
                     if (status == TextToSpeech.SUCCESS) {
-                        tts.setLanguage(Locale.GERMANY);
+                        int lr = tts.setLanguage(Locale.GERMANY);
+                        if (lr == TextToSpeech.LANG_MISSING_DATA || lr == TextToSpeech.LANG_NOT_SUPPORTED) {
+                            emitState("Deutsche Sprachausgabe fehlt: Android-Einstellungen > Text-zu-Sprache > Sprachdaten installieren");
+                        }
                         tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
-                            @Override public void onStart(String id) { }
+                            @Override public void onStart(String id) {
+                                if ("plain".equals(id)) {
+                                    JSObject o = new JSObject();
+                                    o.put("via", "plain");
+                                    notifyListeners("spoke", o);
+                                }
+                            }
+                            @Override public void onError(String id, int errorCode) {
+                                emitState("Sprachausgabe-Fehler " + errorCode);
+                                onError(id);
+                            }
                             @Override public void onDone(String id) {
                                 if ("fx".equals(id)) {
+                                    fxStarted = true;
                                     new Thread(VoicePlugin.this::playFx).start();
                                 } else {
                                     speechFinished();
@@ -236,6 +252,7 @@ public class VoicePlugin extends Plugin {
                     } else {
                         waiting.clear();
                         tts = null;
+                        emitState("Sprachausgabe nicht verfügbar: kein Text-zu-Sprache-Dienst aktiv (Android-Einstellungen > Text-zu-Sprache)");
                     }
                 });
             }
@@ -293,7 +310,13 @@ public class VoicePlugin extends Plugin {
         if (rec != null) { try { rec.cancel(); } catch (Exception ignored) { } }
         emitState(null);
         applyVoice();
+        final int token = ++speakToken;
+        fxStarted = false;
+        // Sicherheitsnetz 1: nach dem Sprechen wieder zuhören, auch wenn kein "fertig" kommt
+        main.postDelayed(() -> { if (speaking && speakToken == token) speechFinished(); }, 7000 + pText.length() * 110L);
         if (pFx) {
+            // Sicherheitsnetz 2: kommt die Effekt-Aufnahme nicht, normal sprechen
+            main.postDelayed(() -> { if (speaking && speakToken == token && !fxStarted) speakPlain(); }, 5000);
             File f = new File(getContext().getCacheDir(), "kitt.wav");
             Bundle b = new Bundle();
             int r = tts.synthesizeToFile(pText, b, f, "fx");
@@ -379,6 +402,9 @@ public class VoicePlugin extends Plugin {
                 @Override public void onPeriodicNotification(AudioTrack track) { }
             });
             t.play();
+            JSObject sp = new JSObject();
+            sp.put("via", "fx");
+            notifyListeners("spoke", sp);
             main.postDelayed(finish, (long) (frames * 1000.0 / rate) + 1500); // Sicherheitsnetz
         } catch (Exception e) {
             // Effekt nicht möglich: normal sprechen
