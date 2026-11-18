@@ -349,7 +349,7 @@ function toast(t,ms=7000){const el=$('#toast');el.textContent=t;el.style.display
 let lastSpoke=0;
 function webSay(t){
  if(!('speechSynthesis' in window))return false;
- const u=new SpeechSynthesisUtterance(t);u.lang='de-DE';u.pitch=+S.global.vpitch;u.rate=+S.global.vrate;
+ const u=new SpeechSynthesisUtterance(t);u.onend=pursuitDone;u.lang='de-DE';u.pitch=+S.global.vpitch;u.rate=+S.global.vrate;
  speechSynthesis.cancel();speechSynthesis.speak(u);return true;
 }
 function say(t){
@@ -407,6 +407,54 @@ function heard(text,alts){
  say(kittAnswer(t));
 }
 const DIRN=['Norden','Nordosten','Osten','Südosten','Süden','Südwesten','Westen','Nordwesten'];
+// ===== Super-Pursuit-Sound: selbst erzeugt (WebAudio), läuft EINMAL nach dem gesprochenen Satz =====
+// Liegt eine Datei www/pursuit.mp3 in der App, wird stattdessen diese abgespielt.
+let actx=null,pursuitPending=false,pursuitSaw=false,pursuitTimer=0;
+function unlockAudio(){try{if(!actx)actx=new (window.AudioContext||window.webkitAudioContext)();if(actx.state==='suspended')actx.resume().catch(()=>{})}catch(_){}}
+document.addEventListener('pointerdown',unlockAudio,{passive:true});
+function noiseBuf(c,sec){const b=c.createBuffer(1,Math.floor(c.sampleRate*sec),c.sampleRate),d=b.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;return b}
+const PURSUIT_SEC=20;
+function playPursuitSynth(){
+ unlockAudio();const c=actx;if(!c)return;
+ const t0=c.currentTime+0.05,D=PURSUIT_SEC;
+ const master=c.createGain(),comp=c.createDynamicsCompressor();
+ master.gain.setValueAtTime(0.0001,t0);master.gain.exponentialRampToValueAtTime(0.9,t0+0.5);
+ master.gain.setValueAtTime(0.9,t0+D*0.8);master.gain.exponentialRampToValueAtTime(0.0001,t0+D);
+ master.connect(comp);comp.connect(c.destination);
+ // Turbinen-Heulen: steigt in 7 s an, bleibt dann hoch
+ const o1=c.createOscillator(),f1=c.createBiquadFilter(),g1=c.createGain();
+ o1.type='sawtooth';f1.type='lowpass';f1.Q.value=6;
+ o1.frequency.setValueAtTime(110,t0);o1.frequency.exponentialRampToValueAtTime(1500,t0+7);o1.frequency.linearRampToValueAtTime(1700,t0+D*0.8);
+ f1.frequency.setValueAtTime(400,t0);f1.frequency.exponentialRampToValueAtTime(4000,t0+7);
+ g1.gain.setValueAtTime(0.05,t0);g1.gain.linearRampToValueAtTime(0.28,t0+7);
+ o1.connect(f1);f1.connect(g1);g1.connect(master);
+ // Pulsieren beim Aufladen: wird schneller
+ const lfo=c.createOscillator(),lg=c.createGain();
+ lfo.frequency.setValueAtTime(3,t0);lfo.frequency.exponentialRampToValueAtTime(28,t0+7);lg.gain.value=0.12;
+ lfo.connect(lg);lg.connect(g1.gain);
+ // Luftrauschen
+ const n=c.createBufferSource(),bp=c.createBiquadFilter(),ng=c.createGain();
+ n.buffer=noiseBuf(c,D+0.5);bp.type='bandpass';bp.Q.value=1.2;
+ bp.frequency.setValueAtTime(300,t0);bp.frequency.exponentialRampToValueAtTime(3200,t0+7);bp.frequency.setValueAtTime(1800,t0+7.5);
+ ng.gain.setValueAtTime(0.02,t0);ng.gain.linearRampToValueAtTime(0.12,t0+7);ng.gain.setValueAtTime(0.35,t0+7.05);ng.gain.exponentialRampToValueAtTime(0.18,t0+9);
+ n.connect(bp);bp.connect(ng);ng.connect(master);
+ // Schub: Tiefton und Knall bei 7 s
+ const sub=c.createOscillator(),sg=c.createGain();
+ sub.type='sine';sub.frequency.setValueAtTime(90,t0+7);sub.frequency.exponentialRampToValueAtTime(32,t0+8.6);
+ sg.gain.setValueAtTime(0.0001,t0);sg.gain.setValueAtTime(0.9,t0+7);sg.gain.exponentialRampToValueAtTime(0.0001,t0+8.8);
+ sub.connect(sg);sg.connect(master);
+ [o1,lfo,n,sub].forEach(x=>{x.start(t0);x.stop(t0+D+0.3)});
+}
+function playPursuit(){
+ let done=false;const a=new Audio('pursuit.mp3');
+ const synth=()=>{if(!done){done=true;playPursuitSynth()}};
+ a.oncanplaythrough=()=>{if(!done){done=true;a.play().catch(synth)}};
+ a.onerror=synth;setTimeout(synth,1500);
+}
+// nach dem gesprochenen Satz einmal abspielen
+function pursuitDone(){if(!pursuitPending)return;pursuitPending=false;clearTimeout(pursuitTimer);setTimeout(playPursuit,350)}
+function pursuitArm(){pursuitPending=true;pursuitSaw=false;clearTimeout(pursuitTimer);pursuitTimer=setTimeout(pursuitDone,30000)}
+
 // Super Pursuit Mode: ein Text am Stück (kein Abbruch durch die Sprachausgabe), dazu Bildschirm-Effekt mit Countdown
 function boostFx(){
  const b=$('#boost');let t=0;
@@ -420,7 +468,7 @@ function boostFx(){
 function kittAnswer(t){
  const A=S.global.anrede||'Michael',v=Math.round(speedKmh),has=re=>re.test(t),acc=accel||0;
  const nhn=(alt!=null&&lat!=null)?alt-geoid(lat,lon):null;
- if(has(/super|pursuit|persuit|persud|pörsuit|schub|turbo/)){boostFx();return `Super Pursuit Mode aktiviert. Halten Sie sich mal fest, ${A}! Fünf. Vier. Drei. Zwei. Eins. Schub!`}
+ if(has(/super|pursuit|persuit|persud|pörsuit|schub|turbo/)){boostFx();pursuitArm();return `Super Pursuit Mode aktiviert. Halten Sie sich mal fest, ${A}! Fünf. Vier. Drei. Zwei. Eins. Schub!`}
  if(has(/limit|erlaubt|darf ich|höchstgeschwindigkeit/))return limit!=null?`${A}, hier sind ${limit} Kilometer pro Stunde erlaubt${roadType?', '+roadType:''}.`:`${A}, ich kenne das Tempolimit hier noch nicht.`;
  if(has(/schnell|geschwindigkeit|tempo|pro stunde/)){
   let a=`${A}, ich messe ${v} Kilometer pro Stunde.`;
@@ -680,7 +728,7 @@ function buildPanel(){
  <div class="small">Setzt die Medienlautstärke während der Ansage auf diesen Wert, danach zurück.</div>
  <div class="row"><label>Tonhöhe</label><input type="range" min="0.4" max="1.6" step="0.05" data-g="vpitch" value="${S.global.vpitch}" style="width:140px"></div>
  <div class="row"><label>Sprechtempo</label><input type="range" min="0.6" max="1.5" step="0.05" data-g="vrate" value="${S.global.vrate}" style="width:140px"></div>
- <div class="row"><button id="vtest">Stimme testen</button><button id="vcheck">Stimme prüfen</button><button id="refall">Alles jetzt aktualisieren</button></div>
+ <div class="row"><button id="vtest">Stimme testen</button><button id="vcheck">Stimme prüfen</button><button id="vpurs">Pursuit-Sound testen</button><button id="refall">Alles jetzt aktualisieren</button></div>
  <div class="small">Beispiele: „KITT, wie schnell fahre ich?“, „KITT, Super Pursuit Mode“ – auch Beschleunigung, Bremsen, Höhe, Wetter, Tankstelle, Stau, Warnung, Tagesstrecke, Satelliten, Richtung, Uhrzeit, Hilfe. Genutzt wird die deutsche Android-Stimme; Stimme, Lautstärke, Tonhöhe und Tempo sind einstellbar.</div>
  <h3>Daten & Sensoren</h3>
  <div class="row"><button id="sens">Bewegungssensor aktivieren</button><button id="rtrip">Tagesstrecke 0</button></div>
@@ -706,6 +754,7 @@ $('#panel').addEventListener('click',async e=>{const id=e.target.id;
  if(id==='close')$('#menu').classList.remove('open');
  if(id==='addrep'){const v=$('#rep').value.trim();if(v){S.reports.unshift({t:Date.now(),txt:v});S.reports=S.reports.slice(0,20);save();$('#rep').value='';renderAll()}}
  if(id==='rtrip'){S.trip.trip=0;save();renderAll()}
+ if(id==='vpurs'){unlockAudio();playPursuit()}
  if(id==='vcheck'){
   const el=$('#vstat');
   if(!Voice){if(el)el.textContent='Status: Prüfung nur in der APK möglich';return}
@@ -751,7 +800,7 @@ $('#b-trip').addEventListener('click',e=>{if(e.target.id==='rtrip2'&&confirm('Ta
 fuelList=S.cache.fuel||[];ab=S.cache.ab||[];
 ['#b-fuel','#b-traffic'].forEach(id=>$(id).addEventListener('change',e=>{const k=e.target.dataset&&e.target.dataset.sc;if(k){S.global[k]=e.target.checked;save();renderAll()}}));
 ['#b-fuel','#b-traffic'].forEach(id=>$(id).addEventListener('click',e=>{const k=e.target.dataset&&e.target.dataset.rf;if(k)refreshNow(k)}));
-if(Voice){Voice.addListener('speech',d=>heard(d.text,d.alts));Voice.addListener('wake',()=>{toast('Ja, ich höre …',2500)});Voice.addListener('spoke',d=>{lastSpoke=Date.now();voiceLast='spricht ('+(d.via||'?')+')';const el=$('#vstat');if(el)el.textContent='Status: '+voiceLast});Voice.addListener('state',d=>{voiceState=d;voiceLast=d.error||d.info||(d.speaking?'spricht':d.recording?'hört auf Befehl':d.listening?'wartet auf „KITT“':'bereit');if(d.error)toast('Mikrofon: '+d.error,5000);else if(d.info)toast(d.info,3000);paintMic();const el=$('#vstat');if(el)el.textContent='Status: '+voiceLast});Voice.voices().then(r=>{voiceList=r.voices||[]}).catch(()=>{})}
+if(Voice){Voice.addListener('speech',d=>heard(d.text,d.alts));Voice.addListener('wake',()=>{toast('Ja, ich höre …',2500)});Voice.addListener('spoke',d=>{lastSpoke=Date.now();voiceLast='spricht ('+(d.via||'?')+')';const el=$('#vstat');if(el)el.textContent='Status: '+voiceLast});Voice.addListener('state',d=>{voiceState=d;if(pursuitPending){if(d.speaking)pursuitSaw=true;else if(pursuitSaw)pursuitDone()}voiceLast=d.error||d.info||(d.speaking?'spricht':d.recording?'hört auf Befehl':d.listening?'wartet auf „KITT“':'bereit');if(d.error)toast('Mikrofon: '+d.error,5000);else if(d.info)toast(d.info,3000);paintMic();const el=$('#vstat');if(el)el.textContent='Status: '+voiceLast});Voice.voices().then(r=>{voiceList=r.voices||[]}).catch(()=>{})}
 $('#mic').onclick=()=>{if(S.global.vmode==='push')talkOnce();else setVoice(!voiceOn)};
 document.addEventListener('visibilitychange',()=>{if(!voiceOn||!Voice)return;if(document.visibilityState==='hidden')Voice.stopListening().catch(()=>{});else Voice.listen().catch(()=>{})});
 if(S.global.voice&&S.global.vmode==='wake')setVoice(true);else if(S.global.voice){S.global.voice=false;save()}
