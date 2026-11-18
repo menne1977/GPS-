@@ -92,7 +92,7 @@ function renderSpeed(){
  const over=limit!=null&&v>limit+S.global.tol;
  const al=$('#al-speed');al.style.display=over?'block':'none';if(over)al.textContent=`ÜBER DEM LIMIT +${Math.round(v-limit)} km/h`;
 }
-function renderLimit(){$('#b-limit').innerHTML=`<div class="big">${limit??'–'}</div><div class="unit">km/h</div><div class="small">${esc(limitSrc)}</div>`}
+function renderLimit(){$('#b-limit').innerHTML=`<div class="big">${limit??'–'}</div><div class="unit">km/h</div><div class="small">${esc(limitSrc)}</div>${errHtml('limit')}`}
 function renderAccel(){$('#b-accel').innerHTML=`<div class="big">${accel==null?'–':accel.toFixed(1)}</div><div class="unit">m/s² (GPS)</div><div class="small">0–100: ${zeroRes?zeroRes.toFixed(1)+' s':'–'} · Sensor: ${gForce.toFixed(2)} g</div>`}
 function renderTrip(){$('#b-trip').innerHTML=`<div class="big">${S.trip.trip.toFixed(1)}</div><div class="unit">km Tagesstrecke</div><div class="small">Gesamt ${S.trip.total.toFixed(0)} km</div>`}
 function renderDay(){
@@ -191,7 +191,19 @@ function stopSat(){
 function renderAll(){renderSpeed();renderLimit();renderAccel();renderTrip();renderDay();renderCompass();renderWeather();renderWarn();renderHeat();renderSat();renderFuel();renderTraffic();renderCustom()}
 
 // Abrufe (nur mit Schalter an, im Intervall)
-async function ov(q){const r=await fetch('https://overpass-api.de/api/interpreter?data='+encodeURIComponent(q));if(!r.ok)throw new Error('overpass');return r.json()}
+// Overpass: Anfragen nacheinander (Server erlaubt nur wenige gleichzeitig), bei Fehler Ersatzserver
+const OV=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.private.coffee/api/interpreter'];
+let ovQ=Promise.resolve();
+function ov(q){const p=ovQ.then(()=>ovTry(q));ovQ=p.catch(()=>{});return p}
+async function ovTry(q){
+ let last='';
+ for(const u of OV){
+  const h=new URL(u).host;
+  try{const r=await fetch(u+'?data='+encodeURIComponent(q));if(r.ok)return await r.json();last=h+' HTTP '+r.status}
+  catch(e){last=h+' '+(e&&e.message||e)}
+ }
+ throw new Error(last||'overpass');
+}
 function parseLimit(tags,country){
  const ms=tags.maxspeed;const pre=((ms||'').match(/^([A-Z]{2}):/)||[])[1]||country||'DE';const T=TAB[pre]||TAB.DE;
  if(ms){
@@ -211,7 +223,7 @@ let country=null;
 async function fetchLimit(){
  if(!S.global.src.limit)return;
  const j=await ov(`[out:json][timeout:10];way(around:25,${lat},${lon})["highway"];out tags 5;`);
- const el=j.elements||[];if(!el.length){limit=null;limitSrc='keine Straße erkannt';return}
+ const el=j.elements||[];delete errs.limit;if(!el.length){limit=null;limitSrc='keine Straße erkannt';return}
  const w=el.find(e=>e.tags.maxspeed)||el[0];const p=parseLimit(w.tags,country);limit=p.v;limitSrc=p.src;
 }
 async function fetchCountry(){const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=3&lat=${lat}&lon=${lon}`,{headers:{'Accept-Language':'de'}});const j=await r.json();country=(j.address?.country_code||'').toUpperCase()||null}
@@ -268,7 +280,7 @@ function maybeFetch(){
  if(S.global.sparmodus)return;
  if(!country&&due('country',60*24)){mark('country');fetchCountry().catch(()=>{})}
  if(!areaPos||hav(areaPos.lat,areaPos.lon,lat,lon)>5000){areaPos={lat,lon};fetchArea().then(()=>{S.last.dwd=0;S.last.heat=0;renderAll()}).catch(()=>{areaPos=null})}
- if(lastLimitPos==null||hav(lastLimitPos.lat,lastLimitPos.lon,lat,lon)>300){lastLimitPos={lat,lon};fetchLimit().then(renderAll).catch(()=>{setTimeout(()=>{lastLimitPos=null},60000)})}
+ if(lastLimitPos==null||hav(lastLimitPos.lat,lastLimitPos.lon,lat,lon)>300){lastLimitPos={lat,lon};fetchLimit().then(renderAll).catch(e=>{errs.limit=String(e&&e.message||e).slice(0,80);renderAll();setTimeout(()=>{lastLimitPos=null},60000)})}
  const iv=S.global.iv;
  if(S.global.src.fuel&&due('fuel',iv.fuel)&&(!fuelPos||hav(fuelPos.lat,fuelPos.lon,lat,lon)>1000)){fuelPos={lat,lon};run('fuel',iv.fuel,fetchFuel,()=>{fuelPos=null})}
  if(S.global.src.weather&&due('wx',iv.weather)&&(!wxPos||hav(wxPos.lat,wxPos.lon,lat,lon)>5000)){wxPos={lat,lon};run('wx',iv.weather,fetchWeather,()=>{wxPos=null})}
