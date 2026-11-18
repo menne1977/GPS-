@@ -114,12 +114,31 @@ async function fetchGround(){
  const r=await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lat}&longitude=${lon}`);if(!r.ok)throw new Error('HTTP '+r.status);
  const j=await r.json();const v=j.elevation&&j.elevation[0];if(typeof v==='number')ground=v;
 }
+// Kompass: Grundgerüst einmal zeichnen, danach nur Drehung ändern (60 Bilder/s, geglättet)
+let cmpCur=null,cmpRaf=0,absSeen=false,headT=0;
+function cmpTarget(){
+ // Ab 15 km/h GPS-Fahrtrichtung (Magnetsensor im Auto gestört), sonst Handy-Sensor
+ if(heading!=null&&speedKmh>=15&&Date.now()-headT<5000)return heading;
+ return compassDev??heading;
+}
 function renderCompass(){
- const h=heading??compassDev;const d=['N','NO','O','SO','S','SW','W','NW'];
- // Rose dreht sich gegen die Fahrtrichtung, daher zeigt der rote Pfeil immer nach Norden
- const rot=h==null?0:-h;
- const svg=`<svg viewBox="0 0 100 100" style="width:110px;height:110px"><g transform="rotate(${rot} 50 50)"><circle cx="50" cy="50" r="46" fill="none" stroke="#2a3644" stroke-width="2"/><text x="50" y="14" font-size="12" font-weight="700" text-anchor="middle" fill="currentColor">N</text><polygon points="50,20 58,54 50,48 42,54" fill="#ff5252"/><polygon points="50,80 58,52 50,58 42,52" fill="currentColor" opacity=".45"/></g></svg>`;
- $('#b-compass').innerHTML=(h==null?svg+'<div class="small">keine Richtung</div>':svg+`<div class="small">${d[Math.round(h/45)%8]} · ${Math.round(h)}°</div>`)+altHtml();
+ const box=$('#b-compass');
+ if(!box.querySelector('#cmp-rose')){
+  box.innerHTML=`<svg viewBox="0 0 100 100" style="width:110px;height:110px"><g id="cmp-rose"><circle cx="50" cy="50" r="46" fill="none" stroke="#2a3644" stroke-width="2"/><text x="50" y="14" font-size="12" font-weight="700" text-anchor="middle" fill="currentColor">N</text><polygon points="50,20 58,54 50,48 42,54" fill="#ff5252"/><polygon points="50,80 58,52 50,58 42,52" fill="currentColor" opacity=".45"/></g></svg><div class="small" id="cmp-txt">keine Richtung</div><div id="cmp-alt"></div>`;
+ }
+ $('#cmp-alt').innerHTML=altHtml();
+ if(!cmpRaf)cmpRaf=requestAnimationFrame(cmpTick);
+}
+function cmpTick(){
+ cmpRaf=0;const t=cmpTarget();if(t==null)return;
+ if(cmpCur==null)cmpCur=t;
+ const diff=((t-cmpCur+540)%360)-180;
+ cmpCur=(cmpCur+diff*0.3+360)%360;
+ const rose=$('#cmp-rose');if(!rose)return;
+ rose.setAttribute('transform',`rotate(${(-cmpCur).toFixed(1)} 50 50)`);
+ const d=['N','NO','O','SO','S','SW','W','NW'];
+ $('#cmp-txt').textContent=`${d[Math.round(cmpCur/45)%8]} · ${Math.round(cmpCur)}°`;
+ if(Math.abs(diff)>0.3)cmpRaf=requestAnimationFrame(cmpTick);
 }
 function renderWeather(){
  if(!S.global.src.weather){$('#b-weather').innerHTML='<div class="small">Wetter aus (Datensparmodus/Schalter)</div>';return}
@@ -338,7 +357,7 @@ function onPos(p){
  if(zeroT&&v>=100&&zeroRes==null)zeroRes=(t-zeroT)/1000;
  if(acc!=null)accel=acc;
  lastPos={lat,lon,t,v};speedKmh=v;
- if(c.heading!=null&&!isNaN(c.heading))heading=c.heading;
+ if(c.heading!=null&&!isNaN(c.heading)){heading=c.heading;headT=Date.now()}
  if(c.altitude!=null&&!isNaN(c.altitude)){alt=c.altitude;altAcc=c.altitudeAccuracy}
  save();renderAll();maybeFetch();
 }
@@ -346,8 +365,14 @@ function onErr(){$('#b-speed').innerHTML='<div class="small">GPS nicht verfügba
 if(navigator.geolocation)navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:0});
 else onErr();
 window.addEventListener('devicemotion',e=>{const a=e.acceleration;if(a)gForce=Math.hypot(a.x||0,a.y||0,a.z||0)/9.81});
-const dor=e=>{if(e.alpha!=null){compassDev=(360-e.alpha)%360;renderCompass()}};
-window.addEventListener('deviceorientationabsolute',dor);window.addEventListener('deviceorientation',dor);
+function dor(e,abs){
+ if(abs)absSeen=true;else if(absSeen)return; // relative Werte ignorieren, sobald absolute kommen
+ let h=null;
+ if(e.webkitCompassHeading!=null)h=e.webkitCompassHeading;
+ else if(e.alpha!=null)h=(360-e.alpha+((screen.orientation&&screen.orientation.angle)||0))%360;
+ if(h==null)return;compassDev=h;if(!cmpRaf)cmpRaf=requestAnimationFrame(cmpTick);
+}
+window.addEventListener('deviceorientationabsolute',e=>dor(e,true));window.addEventListener('deviceorientation',e=>dor(e,false));
 
 // Menü
 function buildPanel(){
