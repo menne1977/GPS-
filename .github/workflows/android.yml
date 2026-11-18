@@ -38,8 +38,23 @@ jobs:
         run: |
           cp android-overlay/*.java android/app/src/main/java/de/menne/gps/
 
+      - name: Vosk-Bibliothek einbinden (Aktivierungswort)
+        run: |
+          sed -i "0,/^dependencies {/s//dependencies {\n    implementation 'com.alphacephei:vosk-android:0.3.47'\n    implementation 'net.java.dev.jna:jna:5.13.0@aar'/" android/app/build.gradle
+          sed -i "0,/defaultConfig {/s//defaultConfig {\n        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }/" android/app/build.gradle
+          grep -n -A3 "defaultConfig {\|^dependencies {" android/app/build.gradle
+
       - name: Web-Dateien übernehmen
         run: npx cap sync android
+
+      - name: Kleines deutsches Sprachmodell (Vosk) laden
+        run: |
+          curl -fL --retry 4 --retry-delay 5 -o model.zip https://alphacephei.com/vosk/models/vosk-model-small-de-0.15.zip
+          unzip -q model.zip
+          mkdir -p android/app/src/main/assets
+          mv vosk-model-small-de-0.15 android/app/src/main/assets/model-de
+          cat /proc/sys/kernel/random/uuid > android/app/src/main/assets/model-de/uuid
+          du -sh android/app/src/main/assets/model-de
 
       - name: Debug-APK bauen
         working-directory: android

@@ -31,12 +31,21 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
+import org.vosk.LibVosk;
+import org.vosk.LogLevel;
+import org.vosk.Model;
+import org.vosk.Recognizer;
+import org.vosk.android.SpeechService;
+import org.vosk.android.StorageService;
+
+import java.util.regex.Pattern;
+
 /**
- * Sprachassistent: Mikrofon (Android-Spracherkennung, Deutsch) und Sprachausgabe (Android-TTS)
- * auf dem Medien-Kanal mit einstellbarer Lautstärke. Vor jeder Ausgabe wird die Erkennung komplett beendet und Audiofokus
- * geholt; danach wird sie neu aufgebaut. Jede Ausgabe hat eine eigene Nummer, damit späte Rückmeldungen
- * älterer Ausgaben nichts durcheinanderbringen.
- * Ereignisse: "speech" {text, alts}, "state" {listening, speaking, error}, "spoke" {via}.
+ * Sprachassistent.
+ * Aktivierungswort: kleines Offline-Sprachmodell (Vosk) hört nur auf "KITT" (ohne Internet, kein Neustart-Signal).
+ * Danach hört die Android-Spracherkennung (Google) EINMAL auf den Befehl; anschließend wartet wieder das Aktivierungswort.
+ * Sprachausgabe: Android-TTS auf dem Medien-Kanal mit einstellbarer Lautstärke.
+ * Ereignisse: "wake", "speech" {text, alts}, "state" {listening, speaking, error, info}, "spoke" {via}.
  */
 @CapacitorPlugin(name = "Voice", permissions = {
         @Permission(alias = "mic", strings = {Manifest.permission.RECORD_AUDIO})
@@ -48,11 +57,9 @@ public class VoicePlugin extends Plugin {
     private TextToSpeech tts;
     private boolean ttsReady = false;
     private final List<Runnable> waiting = new ArrayList<>();
-    private boolean wantListen = false;
+    private boolean wantListen = false;   // Aktivierungswort-Betrieb an
+    private boolean once = false;         // eine Befehls-Aufnahme läuft
     private boolean speaking = false;
-    private int hardErrors = 0;
-    private int idle = 0;
-    private boolean once = false;
     private int token = 0;
     private AudioManager am;
     private AudioFocusRequest focusReq;
@@ -65,7 +72,7 @@ public class VoicePlugin extends Plugin {
         return am;
     }
 
-    // ---------- Mikrofon ----------
+    // ---------- Mikrofon: Dauerbetrieb (Aktivierungswort) ----------
     @PluginMethod
     public void listen(PluginCall call) {
         if (getPermissionState("mic") != PermissionState.GRANTED) {
@@ -75,7 +82,31 @@ public class VoicePlugin extends Plugin {
         begin(call);
     }
 
-    // Einmal zuhören (Tippen & sprechen): kein Dauerbetrieb, kein ständiges Neustarten
+    @PermissionCallback
+    private void micPermResult(PluginCall call) {
+        if (getPermissionState("mic") == PermissionState.GRANTED) begin(call);
+        else call.reject("Mikrofon nicht erlaubt (Android-Einstellungen > Apps > Berechtigungen)");
+    }
+
+    private void begin(PluginCall call) {
+        if (!SpeechRecognizer.isRecognitionAvailable(getContext())) {
+            call.reject("Keine Spracherkennung auf diesem Gerät (Google-App / Sprachdienste fehlen)");
+            return;
+        }
+        wantListen = true;
+        main.post(this::startWake);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void stopListening(PluginCall call) {
+        wantListen = false;
+        once = false;
+        main.post(() -> { stopWake(); killRec(); emitState(null); });
+        call.resolve();
+    }
+
+    // ---------- Mikrofon: einmal zuhören (Tippen & sprechen) ----------
     @PluginMethod
     public void listenOnce(PluginCall call) {
         if (getPermissionState("mic") != PermissionState.GRANTED) {
@@ -96,36 +127,93 @@ public class VoicePlugin extends Plugin {
             call.reject("Keine Spracherkennung auf diesem Gerät (Google-App / Sprachdienste fehlen)");
             return;
         }
-        once = true;
-        main.post(() -> startRec(true));
+        main.post(() -> {
+            stopWake();
+            once = true;
+            startRec(true);
+        });
         call.resolve();
     }
 
-    @PermissionCallback
-    private void micPermResult(PluginCall call) {
-        if (getPermissionState("mic") == PermissionState.GRANTED) begin(call);
-        else call.reject("Mikrofon nicht erlaubt (Android-Einstellungen > Apps > Berechtigungen)");
-    }
+    // ---------- Aktivierungswort (Vosk, offline) ----------
+    private static final Pattern WAKE = Pattern.compile("(^|\\W)(kitt|kit|kid|kitty)(\\W|$)");
+    private Model model;
+    private boolean modelLoading = false;
+    private SpeechService svc;
+    private Recognizer vrec;
+    private boolean waking = false;
 
-    private void begin(PluginCall call) {
-        if (!SpeechRecognizer.isRecognitionAvailable(getContext())) {
-            call.reject("Keine Spracherkennung auf diesem Gerät (Google-App / Sprachdienste fehlen)");
+    private void startWake() {
+        if (!wantListen || speaking || once || svc != null) return;
+        if (model == null) {
+            if (modelLoading) return;
+            modelLoading = true;
+            emitInfo("Sprachmodell wird vorbereitet …");
+            StorageService.unpack(getContext(), "model-de", "model",
+                    m -> { model = m; modelLoading = false; emitInfo("Aktivierungswort bereit"); main.post(this::startWake); },
+                    e -> { modelLoading = false; wantListen = false; emitState("Sprachmodell fehlt: " + e.getMessage()); });
             return;
         }
-        wantListen = true;
-        hardErrors = 0;
-        main.post(() -> startRec(true));
-        call.resolve();
+        try {
+            LibVosk.setLogLevel(LogLevel.WARNINGS);
+            vrec = new Recognizer(model, 16000.0f, "[\"kitt\", \"kit\", \"kid\", \"kitty\", \"[unk]\"]");
+            svc = new SpeechService(vrec, 16000.0f);
+            svc.startListening(new org.vosk.android.RecognitionListener() {
+                @Override public void onPartialResult(String h) { check(h); }
+                @Override public void onResult(String h) { check(h); }
+                @Override public void onFinalResult(String h) { }
+                @Override public void onError(Exception e) {
+                    main.post(() -> {
+                        stopWake();
+                        emitState("Aktivierungswort: " + e.getMessage());
+                        if (wantListen) main.postDelayed(VoicePlugin.this::startWake, 3000);
+                    });
+                }
+                @Override public void onTimeout() { }
+            });
+            emitState(null);
+        } catch (Exception e) {
+            stopWake();
+            emitState("Aktivierungswort startet nicht: " + e.getMessage());
+        }
     }
 
-    @PluginMethod
-    public void stopListening(PluginCall call) {
-        wantListen = false;
-        once = false;
-        main.post(() -> { killRec(); emitState(null); });
-        call.resolve();
+    private void check(String h) {
+        if (waking || h == null) return;
+        if (WAKE.matcher(h).find()) {
+            waking = true;
+            main.post(this::onWake);
+        }
     }
 
+    private void onWake() {
+        waking = false;
+        if (!wantListen || speaking || once) return;
+        stopWake();                       // Mikrofon freigeben
+        once = true;
+        notifyListeners("wake", new JSObject());
+        emitState(null);
+        main.postDelayed(() -> startRec(true), 150);
+    }
+
+    private void stopWake() {
+        waking = false;
+        if (svc != null) {
+            try { svc.stop(); } catch (Exception ignored) { }
+            try { svc.shutdown(); } catch (Exception ignored) { }
+            svc = null;
+        }
+        if (vrec != null) {
+            try { vrec.close(); } catch (Exception ignored) { }
+            vrec = null;
+        }
+    }
+
+    private void afterOnce() {
+        if (wantListen) main.postDelayed(this::startWake, 600);
+    }
+
+    // ---------- Befehls-Aufnahme (Android-Spracherkennung, einmalig) ----------
     private void killRec() {
         if (rec != null) {
             try { rec.cancel(); } catch (Exception ignored) { }
@@ -152,13 +240,13 @@ public class VoicePlugin extends Plugin {
     }
 
     private void startRec(boolean fresh) {
-        if (!(wantListen || once) || speaking) return;
+        if (!once || speaking) return;
         if (fresh) killRec();
         if (rec == null) {
             rec = SpeechRecognizer.createSpeechRecognizer(getContext());
             rec.setRecognitionListener(new RecognitionListener() {
                 @Override public void onReadyForSpeech(Bundle params) { emitState(null); }
-                @Override public void onBeginningOfSpeech() { hardErrors = 0; idle = 0; }
+                @Override public void onBeginningOfSpeech() { }
                 @Override public void onRmsChanged(float rmsdB) { }
                 @Override public void onBufferReceived(byte[] buffer) { }
                 @Override public void onEndOfSpeech() { }
@@ -167,8 +255,8 @@ public class VoicePlugin extends Plugin {
 
                 @Override
                 public void onResults(Bundle results) {
-                    hardErrors = 0;
                     ArrayList<String> list = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                    once = false;
                     if (list != null && !list.isEmpty()) {
                         JSObject o = new JSObject();
                         o.put("text", list.get(0));
@@ -177,39 +265,18 @@ public class VoicePlugin extends Plugin {
                         o.put("alts", alts);
                         notifyListeners("speech", o);
                     }
-                    idle = 0;
-                    if (once) { once = false; emitState(null); return; }
-                    if (!speaking) again(250, false);
+                    emitState(null);
+                    if (!speaking) afterOnce();
                 }
 
                 @Override
                 public void onError(int error) {
-                    if (speaking) return; // Abbruch durch eigene Ausgabe
-                    if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
-                        if (once) { once = false; killRec(); emitState("Nichts verstanden"); return; }
-                        // Ruhephasen: Neustarts seltener, damit das Mikrofon-Symbol weniger flackert
-                        idle++;
-                        again(idle < 3 ? 250 : 1500, false);
-                        return;
-                    }
-                    if (once) { once = false; killRec(); emitState(errText(error)); return; }
-                    if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS || error == 12 || error == 13) {
-                        wantListen = false;
-                        killRec();
-                        emitState(errText(error));
-                        return;
-                    }
-                    hardErrors++;
-                    emitState(errText(error));
-                    if (hardErrors >= 10) {
-                        wantListen = false;
-                        killRec();
-                        emitState("Mikrofon gestoppt nach mehreren Fehlern: " + errText(error));
-                        return;
-                    }
-                    boolean net = error == SpeechRecognizer.ERROR_NETWORK || error == SpeechRecognizer.ERROR_NETWORK_TIMEOUT
-                            || error == SpeechRecognizer.ERROR_SERVER || error == 10;
-                    again(Math.min(6000, (net ? 2000 : 800) * hardErrors), true);
+                    if (speaking) return;
+                    once = false;
+                    killRec();
+                    boolean quiet = error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT;
+                    emitState(quiet ? (wantListen ? null : "Nichts verstanden") : errText(error));
+                    afterOnce();
                 }
             });
         }
@@ -217,27 +284,33 @@ public class VoicePlugin extends Plugin {
         i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "de-DE");
         i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
-        i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L);
-        i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L);
+        i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L);
+        i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L);
         i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
         i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getContext().getPackageName());
         try {
             rec.startListening(i);
         } catch (Exception e) {
+            once = false;
             emitState("Start fehlgeschlagen: " + e.getMessage());
-            again(1500, true);
+            afterOnce();
         }
-    }
-
-    private void again(long delayMs, boolean fresh) {
-        main.postDelayed(() -> startRec(fresh), delayMs);
     }
 
     private void emitState(String error) {
         JSObject o = new JSObject();
         o.put("listening", (wantListen || once) && !speaking);
+        o.put("recording", once && !speaking);
         o.put("speaking", speaking);
         if (error != null) o.put("error", error);
+        notifyListeners("state", o);
+    }
+
+    private void emitInfo(String info) {
+        JSObject o = new JSObject();
+        o.put("listening", (wantListen || once) && !speaking);
+        o.put("speaking", speaking);
+        o.put("info", info);
         notifyListeners("state", o);
     }
 
@@ -418,7 +491,9 @@ public class VoicePlugin extends Plugin {
         if (pText == null || pText.isEmpty() || tts == null) return;
         final int tk = ++token;
         speaking = true;
+        stopWake();                // Aktivierungswort pausieren
         killRec();                 // Erkennung komplett beenden
+        once = false;
         tts.stop();
         emitState(null);
         takeFocus();
@@ -442,13 +517,14 @@ public class VoicePlugin extends Plugin {
             restoreVolume();
             dropFocus();
             emitState(null);
-            if (wantListen) again(700, true);
+            if (wantListen) main.postDelayed(this::startWake, 700);
         });
     }
 
     @Override
     protected void handleOnDestroy() {
         wantListen = false;
+        stopWake();
         killRec();
         restoreVolume();
         dropFocus();

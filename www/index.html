@@ -394,7 +394,7 @@ const WAKE=/(^|[^a-zäöüß])(kitt|kit|kid|kidd|kitty|kiet|kiett|kitte|kitz|kit
 let followUntil=0;
 function heard(text,alts){
  const all=[text].concat(alts||[]).map(x=>String(x||'').toLowerCase());
- const need=S.global.vmode==='wake'&&S.global.wake;
+ const need=false;
  const hit=all.find(x=>WAKE.test(x));
  const follow=Date.now()<followUntil;
  if(need&&!hit&&!follow)return; // alles ohne Aktivierungswort still ignorieren
@@ -670,10 +670,9 @@ function buildPanel(){
  <h3>Stau-Meldung</h3>
  <div class="row"><input id="rep" placeholder="z. B. Stau A7 Ausfahrt 12" style="flex:1"><button id="addrep">+</button></div>
  <h3>Sprachassistent (KITT)</h3>
- <div class="row"><label>Betriebsart</label><select data-g="vmode" style="max-width:200px"><option value="push" ${S.global.vmode==='push'?'selected':''}>Tippen &amp; sprechen</option><option value="wake" ${S.global.vmode==='wake'?'selected':''}>Dauerhaft mit Aktivierungswort</option></select></div>
- <div class="small">„Tippen &amp; sprechen“: 🎤 antippen, dann den Satz sagen (ohne „KITT“). Das Mikrofon ist nur kurz an. „Dauerhaft“: Android startet die Spracherkennung nach jeder Pause neu, dabei kann das Mikrofon-Symbol blinken und ein Signal ertönen. Das lässt sich in der App nicht verhindern.</div>
- <div class="row"><label>Dauerbetrieb an</label><input type="checkbox" id="vmic" ${voiceOn?'checked':''}></div>
- <div class="row"><label>Aktivierungswort „KITT“ nötig</label><input type="checkbox" data-g="wake" ${S.global.wake?'checked':''}></div>
+ <div class="row"><label>Betriebsart</label><select data-g="vmode" style="max-width:200px"><option value="push" ${S.global.vmode==='push'?'selected':''}>Tippen &amp; sprechen</option><option value="wake" ${S.global.vmode==='wake'?'selected':''}>Immer bereit: hört nur auf „KITT“</option></select></div>
+ <div class="small">„Tippen &amp; sprechen“: 🎤 antippen, dann den Satz sagen. „Immer bereit“: ein kleines Sprachmodell in der App lauscht ohne Internet nur auf das Wort „KITT“. Nach dem Signalton sagen Sie den Befehl (ohne „KITT“ zu wiederholen). Das Mikrofon-Symbol von Android bleibt dabei dauerhaft aktiv; der Akku wird etwas stärker belastet.</div>
+ <div class="row"><label>„Immer bereit“ an</label><input type="checkbox" id="vmic" ${voiceOn?'checked':''}></div>
  <div class="row"><label>Anrede</label><input data-g="anrede" value="${esc(S.global.anrede)}" style="width:120px"></div>
  <div class="small" id="vstat">Status: ${esc(voiceLast)}</div>
  <div class="row"><label>Stimme</label><select data-g="vname" style="max-width:190px"><option value="">Standard</option>${voiceList.map(v=>`<option value="${esc(v.name)}" ${S.global.vname===v.name?'selected':''}>${esc(v.name)}${v.network?' (online)':''}</option>`).join('')}</select></div>
@@ -752,7 +751,7 @@ $('#b-trip').addEventListener('click',e=>{if(e.target.id==='rtrip2'&&confirm('Ta
 fuelList=S.cache.fuel||[];ab=S.cache.ab||[];
 ['#b-fuel','#b-traffic'].forEach(id=>$(id).addEventListener('change',e=>{const k=e.target.dataset&&e.target.dataset.sc;if(k){S.global[k]=e.target.checked;save();renderAll()}}));
 ['#b-fuel','#b-traffic'].forEach(id=>$(id).addEventListener('click',e=>{const k=e.target.dataset&&e.target.dataset.rf;if(k)refreshNow(k)}));
-if(Voice){Voice.addListener('speech',d=>heard(d.text,d.alts));Voice.addListener('spoke',d=>{lastSpoke=Date.now();voiceLast='spricht ('+(d.via||'?')+')';const el=$('#vstat');if(el)el.textContent='Status: '+voiceLast});Voice.addListener('state',d=>{voiceState=d;voiceLast=d.error||(d.speaking?'spricht':d.listening?'hört zu':'bereit');if(d.error)toast('Mikrofon: '+d.error,5000);paintMic();const el=$('#vstat');if(el)el.textContent='Status: '+voiceLast});Voice.voices().then(r=>{voiceList=r.voices||[]}).catch(()=>{})}
+if(Voice){Voice.addListener('speech',d=>heard(d.text,d.alts));Voice.addListener('wake',()=>{toast('Ja, ich höre …',2500)});Voice.addListener('spoke',d=>{lastSpoke=Date.now();voiceLast='spricht ('+(d.via||'?')+')';const el=$('#vstat');if(el)el.textContent='Status: '+voiceLast});Voice.addListener('state',d=>{voiceState=d;voiceLast=d.error||d.info||(d.speaking?'spricht':d.recording?'hört auf Befehl':d.listening?'wartet auf „KITT“':'bereit');if(d.error)toast('Mikrofon: '+d.error,5000);else if(d.info)toast(d.info,3000);paintMic();const el=$('#vstat');if(el)el.textContent='Status: '+voiceLast});Voice.voices().then(r=>{voiceList=r.voices||[]}).catch(()=>{})}
 $('#mic').onclick=()=>{if(S.global.vmode==='push')talkOnce();else setVoice(!voiceOn)};
 document.addEventListener('visibilitychange',()=>{if(!voiceOn||!Voice)return;if(document.visibilityState==='hidden')Voice.stopListening().catch(()=>{});else Voice.listen().catch(()=>{})});
 if(S.global.voice&&S.global.vmode==='wake')setVoice(true);else if(S.global.voice){S.global.voice=false;save()}
