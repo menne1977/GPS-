@@ -92,7 +92,7 @@ function renderSpeed(){
  const over=limit!=null&&v>limit+S.global.tol;
  const al=$('#al-speed');al.style.display=over?'block':'none';if(over)al.textContent=`ÜBER DEM LIMIT +${Math.round(v-limit)} km/h`;
 }
-function renderLimit(){$('#b-limit').innerHTML=`<div class="big">${limit??'–'}</div><div class="unit">km/h</div><div class="small">${esc(limitSrc)}</div>${errHtml('limit')}`}
+function renderLimit(){$('#b-limit').innerHTML=`<div class="big">${limit??'–'}</div><div class="unit">km/h</div><div class="small">${esc(roadType||(limit==null?limitSrc:''))}</div>${errHtml('limit')}`}
 function renderAccel(){$('#b-accel').innerHTML=`<div class="big">${accel==null?'–':accel.toFixed(1)}</div><div class="unit">m/s² (GPS)</div><div class="small">0–100: ${zeroRes?zeroRes.toFixed(1)+' s':'–'} · Sensor: ${gForce.toFixed(2)} g</div>`}
 function renderTrip(){$('#b-trip').innerHTML=`<div class="big">${S.trip.trip.toFixed(1)}</div><div class="unit">km Tagesstrecke</div><div class="small">Gesamt ${S.trip.total.toFixed(0)} km</div>`}
 function renderDay(){
@@ -220,11 +220,25 @@ function parseLimit(tags,country){
  return{v:T.rural,src:'Richtwert Landstraße'};
 }
 let country=null;
+// Straßenart aus OSM: Autobahn, Landstraße oder Straße (innerorts)
+const CAR=/^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street|service|road)$/;
+let roadType='';
+function roadKind(t){
+ const h=t.highway||'',zone=[t.maxspeed,t['maxspeed:type'],t['zone:maxspeed'],t['source:maxspeed']].join(' ');
+ if(/^motorway/.test(h))return 'Autobahn';
+ if(/urban/.test(zone)||/^(residential|living_street|service)$/.test(h))return 'Straße';
+ if(/rural/.test(zone))return 'Landstraße';
+ const n=+((t.maxspeed||'').match(/^\d+/)||[0])[0];
+ if(n&&n<=50)return 'Straße';
+ if(n>=70||/^(trunk|primary|secondary|tertiary|unclassified)/.test(h))return 'Landstraße';
+ return 'Straße';
+}
 async function fetchLimit(){
  if(!S.global.src.limit)return;
- const j=await ov(`[out:json][timeout:10];way(around:25,${lat},${lon})["highway"];out tags 5;`);
- const el=j.elements||[];delete errs.limit;if(!el.length){limit=null;limitSrc='keine Straße erkannt';return}
- const w=el.find(e=>e.tags.maxspeed)||el[0];const p=parseLimit(w.tags,country);limit=p.v;limitSrc=p.src;
+ const j=await ov(`[out:json][timeout:10];way(around:25,${lat},${lon})["highway"];out tags 10;`);
+ const el=(j.elements||[]).filter(e=>CAR.test(e.tags.highway||''));delete errs.limit;
+ if(!el.length){limit=null;roadType='';limitSrc='keine Straße erkannt';return}
+ const w=el.find(e=>e.tags.maxspeed)||el[0];const p=parseLimit(w.tags,country);limit=p.v;limitSrc=p.src;roadType=roadKind(w.tags);
 }
 async function fetchCountry(){const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=3&lat=${lat}&lon=${lon}`,{headers:{'Accept-Language':'de'}});const j=await r.json();country=(j.address?.country_code||'').toUpperCase()||null}
 async function fetchFuel(){
