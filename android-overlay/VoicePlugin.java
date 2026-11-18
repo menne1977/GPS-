@@ -51,6 +51,8 @@ public class VoicePlugin extends Plugin {
     private boolean wantListen = false;
     private boolean speaking = false;
     private int hardErrors = 0;
+    private int idle = 0;
+    private boolean once = false;
     private int token = 0;
     private AudioManager am;
     private AudioFocusRequest focusReq;
@@ -73,6 +75,32 @@ public class VoicePlugin extends Plugin {
         begin(call);
     }
 
+    // Einmal zuhören (Tippen & sprechen): kein Dauerbetrieb, kein ständiges Neustarten
+    @PluginMethod
+    public void listenOnce(PluginCall call) {
+        if (getPermissionState("mic") != PermissionState.GRANTED) {
+            requestPermissionForAlias("mic", call, "micPermOnce");
+            return;
+        }
+        beginOnce(call);
+    }
+
+    @PermissionCallback
+    private void micPermOnce(PluginCall call) {
+        if (getPermissionState("mic") == PermissionState.GRANTED) beginOnce(call);
+        else call.reject("Mikrofon nicht erlaubt (Android-Einstellungen > Apps > Berechtigungen)");
+    }
+
+    private void beginOnce(PluginCall call) {
+        if (!SpeechRecognizer.isRecognitionAvailable(getContext())) {
+            call.reject("Keine Spracherkennung auf diesem Gerät (Google-App / Sprachdienste fehlen)");
+            return;
+        }
+        once = true;
+        main.post(() -> startRec(true));
+        call.resolve();
+    }
+
     @PermissionCallback
     private void micPermResult(PluginCall call) {
         if (getPermissionState("mic") == PermissionState.GRANTED) begin(call);
@@ -93,6 +121,7 @@ public class VoicePlugin extends Plugin {
     @PluginMethod
     public void stopListening(PluginCall call) {
         wantListen = false;
+        once = false;
         main.post(() -> { killRec(); emitState(null); });
         call.resolve();
     }
@@ -123,13 +152,13 @@ public class VoicePlugin extends Plugin {
     }
 
     private void startRec(boolean fresh) {
-        if (!wantListen || speaking) return;
+        if (!(wantListen || once) || speaking) return;
         if (fresh) killRec();
         if (rec == null) {
             rec = SpeechRecognizer.createSpeechRecognizer(getContext());
             rec.setRecognitionListener(new RecognitionListener() {
                 @Override public void onReadyForSpeech(Bundle params) { emitState(null); }
-                @Override public void onBeginningOfSpeech() { hardErrors = 0; }
+                @Override public void onBeginningOfSpeech() { hardErrors = 0; idle = 0; }
                 @Override public void onRmsChanged(float rmsdB) { }
                 @Override public void onBufferReceived(byte[] buffer) { }
                 @Override public void onEndOfSpeech() { }
@@ -148,6 +177,8 @@ public class VoicePlugin extends Plugin {
                         o.put("alts", alts);
                         notifyListeners("speech", o);
                     }
+                    idle = 0;
+                    if (once) { once = false; emitState(null); return; }
                     if (!speaking) again(250, false);
                 }
 
@@ -155,9 +186,13 @@ public class VoicePlugin extends Plugin {
                 public void onError(int error) {
                     if (speaking) return; // Abbruch durch eigene Ausgabe
                     if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
-                        again(250, false);
+                        if (once) { once = false; killRec(); emitState("Nichts verstanden"); return; }
+                        // Ruhephasen: Neustarts seltener, damit das Mikrofon-Symbol weniger flackert
+                        idle++;
+                        again(idle < 3 ? 250 : 1500, false);
                         return;
                     }
+                    if (once) { once = false; killRec(); emitState(errText(error)); return; }
                     if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS || error == 12 || error == 13) {
                         wantListen = false;
                         killRec();
@@ -182,6 +217,8 @@ public class VoicePlugin extends Plugin {
         i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "de-DE");
         i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
+        i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L);
+        i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L);
         i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
         i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getContext().getPackageName());
         try {
@@ -198,7 +235,7 @@ public class VoicePlugin extends Plugin {
 
     private void emitState(String error) {
         JSObject o = new JSObject();
-        o.put("listening", wantListen && !speaking);
+        o.put("listening", (wantListen || once) && !speaking);
         o.put("speaking", speaking);
         if (error != null) o.put("error", error);
         notifyListeners("state", o);

@@ -75,7 +75,7 @@ const TAB={DE:{urban:50,rural:100,motorway:130},AT:{urban:50,rural:100,motorway:
 FR:{urban:50,rural:80,motorway:130},IT:{urban:50,rural:90,motorway:130},NL:{urban:50,rural:80,motorway:100},PL:{urban:50,rural:90,motorway:140}};
 const WX={0:'Sonne',1:'überwiegend sonnig',2:'teils bewölkt',3:'bedeckt',45:'Nebel',48:'Nebel',51:'Niesel',53:'Niesel',55:'Niesel',61:'Regen',63:'Regen',65:'starker Regen',71:'Schnee',73:'Schnee',75:'starker Schnee',80:'Schauer',81:'Schauer',82:'starke Schauer',95:'Gewitter',96:'Gewitter mit Hagel',99:'Gewitter mit Hagel'};
 // Abfrage-Intervalle in Minuten; Datenquellen einzeln schaltbar, Datensparmodus schaltet alle Abrufe ab.
-const DEF={global:{analog:false,awake:true,orient:'off',tol:5,tpl:'{speed} km/h · {temp}°C · Limit {limit}',sparmodus:false,style:'digital',voice:false,vvol:80,vname:'',scFuel:false,scTraffic:false,wake:true,anrede:'Michael',vpitch:0.85,vrate:0.95,
+const DEF={global:{analog:false,awake:true,orient:'off',tol:5,tpl:'{speed} km/h · {temp}°C · Limit {limit}',sparmodus:false,style:'digital',voice:false,vmode:'push',vvol:80,vname:'',scFuel:false,scTraffic:false,wake:true,anrede:'Michael',vpitch:0.85,vrate:0.95,
  src:{weather:true,dwd:true,fuel:true,limit:true,heat:true,sat:true,autobahn:true},iv:{weather:30,dwd:15,fuel:30},fuelKm:5,},
  widgets:{},trip:{total:0,trip:0},day:{d:'',max:0,mt:0,dist:0},reports:[],last:{}};
 WIDGETS.forEach(w=>DEF.widgets[w.id]={on:true,color:'#e8eef5',scale:1});
@@ -370,8 +370,16 @@ function webListen(on){
  return true;
 }
 function paintMic(){
- const b=$('#mic');b.classList.toggle('on',voiceOn);b.classList.toggle('talk',!!voiceState.speaking);
- $('#scan').style.display=voiceOn?'block':'none';
+ const b=$('#mic'),act=voiceOn||!!voiceState.listening;
+ b.classList.toggle('on',act);b.classList.toggle('talk',!!voiceState.speaking);
+ $('#scan').style.display=act?'block':'none';
+}
+function talkOnce(){
+ if(Voice){Voice.listenOnce().catch(e=>toast('Mikrofon: '+(e&&e.message||e),6000));return}
+ if(!WR){toast('Spracherkennung wird hier nicht unterstützt (in der APK schon)');return}
+ const r=new WR();r.lang='de-DE';r.continuous=false;r.interimResults=false;
+ r.onresult=e=>heard(e.results[0][0].transcript);r.onend=()=>{voiceState.listening=false;paintMic()};
+ voiceState.listening=true;paintMic();try{r.start()}catch(_){}
 }
 async function setVoice(on){
  if(on){
@@ -386,13 +394,15 @@ const WAKE=/(^|[^a-zäöüß])(kitt|kit|kid|kidd|kitty|kiet|kiett|kitte|kitz|kit
 let followUntil=0;
 function heard(text,alts){
  const all=[text].concat(alts||[]).map(x=>String(x||'').toLowerCase());
+ const need=S.global.vmode==='wake'&&S.global.wake;
  const hit=all.find(x=>WAKE.test(x));
  const follow=Date.now()<followUntil;
- if(S.global.wake&&!hit&&!follow)return; // alles ohne Aktivierungswort still ignorieren
+ if(need&&!hit&&!follow)return; // alles ohne Aktivierungswort still ignorieren
  const t=hit||all[0];
+ if(!need&&!t.replace(WAKE,' ').trim())return;
  toast('Du: '+text,4000);
  const rest=t.replace(WAKE,' ').replace(/[^a-zäöüß0-9 ]/g,' ').trim();
- if(S.global.wake&&hit&&rest.length<3){followUntil=Date.now()+9000;say(`Ja, ${S.global.anrede||'Michael'}?`);return}
+ if(need&&hit&&rest.length<3){followUntil=Date.now()+9000;say(`Ja, ${S.global.anrede||'Michael'}?`);return}
  followUntil=0;
  say(kittAnswer(t));
 }
@@ -660,7 +670,9 @@ function buildPanel(){
  <h3>Stau-Meldung</h3>
  <div class="row"><input id="rep" placeholder="z. B. Stau A7 Ausfahrt 12" style="flex:1"><button id="addrep">+</button></div>
  <h3>Sprachassistent (KITT)</h3>
- <div class="row"><label>Mikrofon an</label><input type="checkbox" id="vmic" ${voiceOn?'checked':''}></div>
+ <div class="row"><label>Betriebsart</label><select data-g="vmode" style="max-width:200px"><option value="push" ${S.global.vmode==='push'?'selected':''}>Tippen &amp; sprechen</option><option value="wake" ${S.global.vmode==='wake'?'selected':''}>Dauerhaft mit Aktivierungswort</option></select></div>
+ <div class="small">„Tippen &amp; sprechen“: 🎤 antippen, dann den Satz sagen (ohne „KITT“). Das Mikrofon ist nur kurz an. „Dauerhaft“: Android startet die Spracherkennung nach jeder Pause neu, dabei kann das Mikrofon-Symbol blinken und ein Signal ertönen. Das lässt sich in der App nicht verhindern.</div>
+ <div class="row"><label>Dauerbetrieb an</label><input type="checkbox" id="vmic" ${voiceOn?'checked':''}></div>
  <div class="row"><label>Aktivierungswort „KITT“ nötig</label><input type="checkbox" data-g="wake" ${S.global.wake?'checked':''}></div>
  <div class="row"><label>Anrede</label><input data-g="anrede" value="${esc(S.global.anrede)}" style="width:120px"></div>
  <div class="small" id="vstat">Status: ${esc(voiceLast)}</div>
@@ -683,7 +695,8 @@ $('#menu').addEventListener('click',e=>{if(e.target.id==='menu')$('#menu').class
 $('#panel').addEventListener('input',e=>{const t=e.target;
  if(t.dataset.w){const c=S.widgets[t.dataset.w],k=t.dataset.k;c[k]=t.type==='checkbox'?t.checked:(k==='scale'?+t.value:t.value)}
  if(t.dataset.g){const k=t.dataset.g;S.global[k]=t.type==='checkbox'?t.checked:(t.type==='number'||t.type==='range'?+t.value:t.value)}
- if(t.id==='vmic'){setVoice(t.checked);return}
+ if(t.id==='vmic'){if(t.checked&&S.global.vmode!=='wake'){S.global.vmode='wake';save();buildPanel()}setVoice(t.checked);return}
+ if(t.dataset.g==='vmode'){S.global.vmode=t.value;save();if(t.value==='push'&&voiceOn)setVoice(false);buildPanel();return}
  if(t.dataset.g==='vvol'){const o=$('#vvolv');if(o)o.textContent=t.value}
  if(t.dataset.src){S.global.src[t.dataset.src]=t.checked}
  if(t.dataset.src==='sat'){t.checked?startSat():stopSat()}
@@ -740,9 +753,9 @@ fuelList=S.cache.fuel||[];ab=S.cache.ab||[];
 ['#b-fuel','#b-traffic'].forEach(id=>$(id).addEventListener('change',e=>{const k=e.target.dataset&&e.target.dataset.sc;if(k){S.global[k]=e.target.checked;save();renderAll()}}));
 ['#b-fuel','#b-traffic'].forEach(id=>$(id).addEventListener('click',e=>{const k=e.target.dataset&&e.target.dataset.rf;if(k)refreshNow(k)}));
 if(Voice){Voice.addListener('speech',d=>heard(d.text,d.alts));Voice.addListener('spoke',d=>{lastSpoke=Date.now();voiceLast='spricht ('+(d.via||'?')+')';const el=$('#vstat');if(el)el.textContent='Status: '+voiceLast});Voice.addListener('state',d=>{voiceState=d;voiceLast=d.error||(d.speaking?'spricht':d.listening?'hört zu':'bereit');if(d.error)toast('Mikrofon: '+d.error,5000);paintMic();const el=$('#vstat');if(el)el.textContent='Status: '+voiceLast});Voice.voices().then(r=>{voiceList=r.voices||[]}).catch(()=>{})}
-$('#mic').onclick=()=>setVoice(!voiceOn);
+$('#mic').onclick=()=>{if(S.global.vmode==='push')talkOnce();else setVoice(!voiceOn)};
 document.addEventListener('visibilitychange',()=>{if(!voiceOn||!Voice)return;if(document.visibilityState==='hidden')Voice.stopListening().catch(()=>{});else Voice.listen().catch(()=>{})});
-if(S.global.voice)setVoice(true);
+if(S.global.voice&&S.global.vmode==='wake')setVoice(true);else if(S.global.voice){S.global.voice=false;save()}
 applyCfg();renderAll();wake();applyOrient();startSat();
 setInterval(renderCustom,1000);
 setInterval(()=>{if(S.global.style==='cockpit')renderSpeed()},250);
