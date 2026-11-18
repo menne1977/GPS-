@@ -108,20 +108,20 @@ function renderCompass(){
 }
 function renderWeather(){
  if(!S.global.src.weather){$('#b-weather').innerHTML='<div class="small">Wetter aus (Datensparmodus/Schalter)</div>';return}
- if(!wx){$('#b-weather').innerHTML='<div class="small">Wetter lädt…</div>';return}
+ if(!wx){$('#b-weather').innerHTML=errs.wx?'<div class="small">Wetter</div>'+errHtml('wx'):'<div class="small">Wetter lädt…</div>';return}
  const c=wx.cur,pp=wx.pp,rainIn=pp.findIndex(p=>p>=50);
- $('#b-weather').innerHTML=`<div class="big">${Math.round(c.temperature_2m)}°</div><div class="unit">${esc(WX[c.weather_code]||'wechselhaft')}</div><div class="small">${rainIn>=0?`Regen wahrscheinlich in ${rainIn} h (${pp[rainIn]}%)`:'kein Regen in den nächsten 6 h'}</div><div class="small">Böen ${Math.round(c.wind_gusts_10m)} km/h</div>`;
+ $('#b-weather').innerHTML=`<div class="big">${Math.round(c.temperature_2m)}°</div><div class="unit">${esc(WX[c.weather_code]||'wechselhaft')}</div><div class="small">${rainIn>=0?`Regen wahrscheinlich in ${rainIn} h (${pp[rainIn]}%)`:'kein Regen in den nächsten 6 h'}</div><div class="small">Böen ${Math.round(c.wind_gusts_10m)} km/h</div>${errHtml('wx')}`;
 }
 function renderWarn(){
  if(!S.global.src.dwd){$('#b-warn').innerHTML='<div class="small">DWD aus (Schalter)</div>';return}
  if(!area){$('#b-warn').innerHTML='<div class="small">Standort wird ermittelt…</div>';return}
  const list=warn||[];const al=$('#al-warn');
  al.style.display=list.length?'block':'none';if(list.length)al.textContent='AMTLICHE WARNUNG';
- $('#b-warn').innerHTML=list.length?`<ul class="list">${list.slice(0,4).map(w=>`<li><span>${esc(w.event)}</span><span>${esc(w.level)}</span></li>`).join('')}</ul><div class="small">${esc(area.kreis||area.ort)}</div>`:`<div class="small">Keine aktiven Warnungen für ${esc(area.kreis||area.ort)}</div><div class="small">Quelle: DWD</div>`;
+ $('#b-warn').innerHTML=list.length?`<ul class="list">${list.slice(0,4).map(w=>`<li><span>${esc(w.event)}</span><span>${esc(w.level)}</span></li>`).join('')}</ul><div class="small">${esc(area.kreis||area.ort)}</div>`:`<div class="small">Keine aktiven Warnungen für ${esc(area.kreis||area.ort)}</div><div class="small">Quelle: DWD</div>`+errHtml('dwd');
 }
 function renderFuel(){
  if(!S.global.src.fuel){$('#b-fuel').innerHTML='<div class="small">Tankstellen aus (Schalter)</div>';return}
- $('#b-fuel').innerHTML=fuelList.length?`<ul class="list">${fuelList.map(f=>`<li><span>${esc(f.name)}</span><span>${f.d.toFixed(1)} km</span></li>`).join('')}</ul><div class="small">Preise nicht enthalten · Umkreis ${S.global.fuelKm} km</div>`:`<div class="small">Keine Tankstelle im Umkreis von ${S.global.fuelKm} km</div>`;
+ $('#b-fuel').innerHTML=fuelList.length?`<ul class="list">${fuelList.map(f=>`<li><span>${esc(f.name)}</span><span>${f.d.toFixed(1)} km</span></li>`).join('')}</ul><div class="small">Preise nicht enthalten · Umkreis ${S.global.fuelKm} km</div>`:errs.fuel?errHtml('fuel'):`<div class="small">Keine Tankstelle im Umkreis von ${S.global.fuelKm} km</div>`;
 }
 // Autobahn-Meldungen: Autobahnen im Umkreis von 30 km (OSM), dann je Autobahn die Meldungen der Autobahn-API
 let ab=[],abPos=null;
@@ -138,7 +138,7 @@ async function fetchAutobahn(){
  ab=out;
 }
 function renderTraffic(){
- const abHtml=!S.global.src.autobahn?'<div class="small">Autobahn-Meldungen aus</div>':ab.length?`<ul class="list">${ab.slice(0,5).map(x=>`<li><span>${esc(x.road)}</span><span>${esc(x.title)}</span></li>`).join('')}</ul><div class="small">Quelle: Autobahn GmbH</div>`:'<div class="small">Keine Autobahn-Meldung im Umkreis von 30 km</div>';
+ const abHtml=!S.global.src.autobahn?'<div class="small">Autobahn-Meldungen aus</div>':ab.length?`<ul class="list">${ab.slice(0,5).map(x=>`<li><span>${esc(x.road)}</span><span>${esc(x.title)}</span></li>`).join('')}</ul><div class="small">Quelle: Autobahn GmbH</div>`:errs.ab?errHtml('ab'):'<div class="small">Keine Autobahn-Meldung im Umkreis von 30 km</div>';
  const rep=S.reports.length?`<ul class="list">${S.reports.slice(0,3).map(r=>`<li><span>${esc(r.txt)}</span><span>${new Date(r.t).toTimeString().slice(0,5)}</span></li>`).join('')}</ul>`:'';
  $('#b-traffic').innerHTML=abHtml+rep;
 }
@@ -152,7 +152,7 @@ function renderHeat(){
  const el=$('#b-heat');
  if(!S.global.src.heat){el.innerHTML='<div class="small">Hitze aus (Schalter)</div>';return}
  if(!area){el.innerHTML='<div class="small">Standort wird ermittelt…</div>';return}
- if(!heat){el.innerHTML='<div class="small">Lädt…</div>';return}
+ if(!heat){el.innerHTML=errs.heat?errHtml('heat'):'<div class="small">Lädt…</div>';return}
  const al=$('#al-heat');al.style.display=heat.length?'block':'none';if(heat.length)al.textContent='HITZEWARNUNG';
  el.innerHTML=heat.length?heat.slice(0,3).map(f=>`<div class="small">${String(f.EC_II)==='248'?'Extreme Hitze':'Starke Hitze'} bis ${esc(f.EXPIRES||'?')}</div>`).join(''):'<div class="small">Keine Hitzewarnung</div><div class="small">Quelle: DWD</div>';
 }
@@ -222,7 +222,8 @@ async function fetchFuel(){
 }
 async function fetchWeather(){
  const u=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code,wind_gusts_10m&hourly=precipitation_probability&timezone=auto&forecast_days=2`;
- const j=await (await fetch(u)).json();
+ const r=await fetch(u);if(!r.ok)throw new Error('HTTP '+r.status);const j=await r.json();
+ if(!j.current||!j.hourly)throw new Error('Antwort unvollständig');
  const idx=Math.max(0,j.hourly.time.findIndex(t=>t>=j.current.time));
  wx={cur:j.current,pp:j.hourly.precipitation_probability.slice(idx,idx+6)};
 }
@@ -252,16 +253,28 @@ async function fetchDwd(){
 // Schalter und Intervalle: Abruf nur, wenn Quelle an ist und Intervall abgelaufen
 function due(key,minutes){const last=S.last[key]||0;return Date.now()-last>minutes*60000}
 function mark(key){S.last[key]=Date.now();save()}
+// Fehler je Quelle; bei Fehler neuer Versuch nach 2 Minuten, auch ohne Bewegung
+const errs={};
+function run(key,iv,fn,onFail){
+ mark(key);
+ return fn().then(()=>{delete errs[key];renderAll()}).catch(e=>{
+  errs[key]=String(e&&e.message||e).slice(0,80);
+  S.last[key]=Date.now()-Math.max(0,iv-2)*60000;save();
+  if(onFail)onFail();renderAll();
+ });
+}
+function errHtml(key){return errs[key]?`<div class="small" style="color:var(--warn)">nicht erreichbar: ${esc(errs[key])}</div>`:''}
 function maybeFetch(){
  if(S.global.sparmodus)return;
  if(!country&&due('country',60*24)){mark('country');fetchCountry().catch(()=>{})}
- if(!areaPos||hav(areaPos.lat,areaPos.lon,lat,lon)>5000){areaPos={lat,lon};fetchArea().then(()=>{S.last.dwd=0;S.last.heat=0;renderAll()}).catch(()=>{})}
- if(lastLimitPos==null||hav(lastLimitPos.lat,lastLimitPos.lon,lat,lon)>300){lastLimitPos={lat,lon};fetchLimit().then(renderAll).catch(()=>{})}
- if(S.global.src.fuel&&due('fuel',S.global.iv.fuel)&&(!fuelPos||hav(fuelPos.lat,fuelPos.lon,lat,lon)>1000)){mark('fuel');fuelPos={lat,lon};fetchFuel().then(renderAll).catch(()=>{})}
- if(S.global.src.weather&&due('wx',S.global.iv.weather)&&(!wxPos||hav(wxPos.lat,wxPos.lon,lat,lon)>5000)){mark('wx');wxPos={lat,lon};fetchWeather().then(renderAll).catch(()=>{})}
- if(S.global.src.dwd&&area&&due('dwd',S.global.iv.dwd)){mark('dwd');fetchDwd().then(renderAll).catch(()=>{})}
- if(S.global.src.heat&&area&&due('heat',S.global.iv.dwd)){mark('heat');fetchHeat().then(renderAll).catch(()=>{})}
- if(S.global.src.autobahn&&due('ab',S.global.iv.dwd)&&(!abPos||hav(abPos.lat,abPos.lon,lat,lon)>5000)){mark('ab');abPos={lat,lon};fetchAutobahn().then(renderAll).catch(()=>{})}
+ if(!areaPos||hav(areaPos.lat,areaPos.lon,lat,lon)>5000){areaPos={lat,lon};fetchArea().then(()=>{S.last.dwd=0;S.last.heat=0;renderAll()}).catch(()=>{areaPos=null})}
+ if(lastLimitPos==null||hav(lastLimitPos.lat,lastLimitPos.lon,lat,lon)>300){lastLimitPos={lat,lon};fetchLimit().then(renderAll).catch(()=>{setTimeout(()=>{lastLimitPos=null},60000)})}
+ const iv=S.global.iv;
+ if(S.global.src.fuel&&due('fuel',iv.fuel)&&(!fuelPos||hav(fuelPos.lat,fuelPos.lon,lat,lon)>1000)){fuelPos={lat,lon};run('fuel',iv.fuel,fetchFuel,()=>{fuelPos=null})}
+ if(S.global.src.weather&&due('wx',iv.weather)&&(!wxPos||hav(wxPos.lat,wxPos.lon,lat,lon)>5000)){wxPos={lat,lon};run('wx',iv.weather,fetchWeather,()=>{wxPos=null})}
+ if(S.global.src.dwd&&area&&due('dwd',iv.dwd))run('dwd',iv.dwd,fetchDwd);
+ if(S.global.src.heat&&area&&due('heat',iv.dwd))run('heat',iv.dwd,fetchHeat);
+ if(S.global.src.autobahn&&due('ab',iv.dwd)&&(!abPos||hav(abPos.lat,abPos.lon,lat,lon)>5000)){abPos={lat,lon};run('ab',iv.dwd,fetchAutobahn,()=>{abPos=null})}
 }
 
 function onPos(p){
