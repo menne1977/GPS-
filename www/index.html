@@ -35,6 +35,9 @@ label.sc{font-size:12px;color:var(--mut);margin-left:8px;white-space:nowrap}
 .scr::-webkit-scrollbar{width:4px}
 .scr::-webkit-scrollbar-thumb{background:#3a4a5c;border-radius:2px}
 button.rf{margin-top:6px;padding:6px 12px;font-size:13px}
+#boost{display:none;position:fixed;inset:0;z-index:14;pointer-events:none;align-items:center;justify-content:center;text-align:center;font-weight:900;color:#fff;text-shadow:0 0 18px #ff1a1a;background:radial-gradient(circle,rgba(255,26,26,.55),rgba(0,0,0,.85));animation:pulse .5s ease-in-out infinite alternate}
+#boost.on{display:flex}
+@keyframes pulse{from{opacity:.75}to{opacity:1}}
 #open{position:fixed;top:6px;right:6px;z-index:5;background:#22303f;color:var(--txt);border:0;border-radius:8px;padding:6px 10px;font-size:18px}
 #menu{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;justify-content:flex-end;z-index:9}
 #menu.open{display:flex}
@@ -47,7 +50,7 @@ input,select,textarea{background:#0b0f14;color:#fff;border:0;border-radius:8px;p
 </style>
 </head>
 <body>
-<button id="open" aria-label="Menü">☰</button><button id="mic" aria-label="Mikrofon">🎤</button><div id="scan"></div><div id="toast"></div>
+<button id="open" aria-label="Menü">☰</button><button id="mic" aria-label="Mikrofon">🎤</button><div id="scan"></div><div id="toast"></div><div id="boost"></div>
 <div id="app"></div>
 <div id="navsheet"><div id="navbox"></div></div>
 <div id="menu"><div id="panel"></div></div>
@@ -387,9 +390,20 @@ function heard(text){
  say(kittAnswer(t));
 }
 const DIRN=['Norden','Nordosten','Osten','Südosten','Süden','Südwesten','Westen','Nordwesten'];
+// Super Pursuit Mode: ein Text am Stück (kein Abbruch durch die Sprachausgabe), dazu Bildschirm-Effekt mit Countdown
+function boostFx(){
+ const b=$('#boost');let t=0;
+ const show=(txt,size,ms)=>{setTimeout(()=>{b.textContent=txt;b.style.fontSize=size;b.classList.add('on')},t);t+=ms};
+ show('SUPER PURSUIT MODE','9vw',3600);
+ [5,4,3,2,1].forEach(n=>show(String(n),'38vw',1000));
+ show('SCHUB!','20vw',1600);
+ setTimeout(()=>b.classList.remove('on'),t);
+ b.onclick=null;
+}
 function kittAnswer(t){
  const A=S.global.anrede||'Michael',v=Math.round(speedKmh),has=re=>re.test(t),acc=accel||0;
  const nhn=(alt!=null&&lat!=null)?alt-geoid(lat,lon):null;
+ if(has(/super|pursuit|persuit|persud|pörsuit|schub|turbo/)){boostFx();return `Super Pursuit Mode aktiviert. Halten Sie sich mal fest, ${A}! Fünf. Vier. Drei. Zwei. Eins. Schub!`}
  if(has(/limit|erlaubt|darf ich|höchstgeschwindigkeit/))return limit!=null?`${A}, hier sind ${limit} Kilometer pro Stunde erlaubt${roadType?', '+roadType:''}.`:`${A}, ich kenne das Tempolimit hier noch nicht.`;
  if(has(/schnell|geschwindigkeit|tempo|pro stunde/)){
   let a=`${A}, ich messe ${v} Kilometer pro Stunde.`;
@@ -648,7 +662,7 @@ function buildPanel(){
  <div class="row"><label>Tonhöhe</label><input type="range" min="0.4" max="1.6" step="0.05" data-g="vpitch" value="${S.global.vpitch}" style="width:140px"></div>
  <div class="row"><label>Sprechtempo</label><input type="range" min="0.6" max="1.5" step="0.05" data-g="vrate" value="${S.global.vrate}" style="width:140px"></div>
  <div class="row"><button id="vtest">Stimme testen</button><button id="vkitt">KITT-Einstellung</button><button id="refall">Alles jetzt aktualisieren</button></div>
- <div class="small">Beispiele: „KITT, wie schnell fahre ich?“ – auch Beschleunigung, Bremsen, Höhe, Wetter, Tankstelle, Stau, Warnung, Tagesstrecke, Satelliten, Richtung, Uhrzeit, Hilfe. Die Originalstimme der Serie lässt sich nicht nachbilden; genutzt wird die deutsche Android-Stimme, Tonhöhe und Tempo sind einstellbar.</div>
+ <div class="small">Beispiele: „KITT, wie schnell fahre ich?“, „KITT, Super Pursuit Mode“ – auch Beschleunigung, Bremsen, Höhe, Wetter, Tankstelle, Stau, Warnung, Tagesstrecke, Satelliten, Richtung, Uhrzeit, Hilfe. Die Originalstimme der Serie lässt sich nicht nachbilden; genutzt wird die deutsche Android-Stimme, Tonhöhe und Tempo sind einstellbar.</div>
  <h3>Daten & Sensoren</h3>
  <div class="row"><button id="sens">Bewegungssensor aktivieren</button><button id="rtrip">Tagesstrecke 0</button></div>
  <div class="row"><button id="reset">Alles zurücksetzen</button></div>
