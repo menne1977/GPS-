@@ -41,7 +41,7 @@ const WIDGETS=[
 {id:'accel',name:'Beschleunigung',base:170},
 {id:'trip',name:'Kilometer',base:200},
 {id:'day',name:'Heute',base:200},
-{id:'compass',name:'Kompass',base:150},
+{id:'compass',name:'Kompass & Höhe',base:190},
 {id:'weather',name:'Wetter',base:230},
 {id:'warn',name:'DWD-Warnung',base:230},
 {id:'heat',name:'Hitzewarnung',base:200},
@@ -66,6 +66,7 @@ function hav(a,b,c,d){const R=6371000,r=x=>x*Math.PI/180;const dA=r(c-a),dB=r(d-
 
 // Zustand
 let speedKmh=0,accel=null,zeroRes=null,gForce=0,heading=null,compassDev=null,limit=null,limitSrc='',fuelList=[],wx=null,warn=null,lat=null,lon=null,lastPos=null,zeroT=null;
+let alt=null,altAcc=null,ground=null,groundPos=null;
 let fuelPos=null,wxPos=null,lastLimitPos=null,area=null,areaPos=null;
 
 WIDGETS.forEach(w=>{const d=document.createElement('div');d.className='w';d.id='w-'+w.id;d.innerHTML=`<div class="alert" id="al-${w.id}"></div><h4>${w.name}</h4><div id="b-${w.id}"></div>`;$('#app').appendChild(d)});
@@ -99,12 +100,26 @@ function renderDay(){
  const avg=S.day.mt>0?Math.round(S.day.dist/(S.day.mt/3600000)):0;
  $('#b-day').innerHTML=`<div class="big" style="font-size:calc(var(--s,1)*36px)">${Math.round(S.day.max)}</div><div class="unit">km/h Höchstwert</div><div class="small">Ø bewegt ${avg} km/h · ${S.day.dist.toFixed(1)} km</div>`;
 }
+// Geoidhöhe Deutschland (Abstand Ellipsoid WGS84 -> NHN), grobe Näherung aus Stützpunkten (EGM2008), etwa ±2 m
+const GEO=[[53.55,10,40.5],[52.5,13.4,39.5],[54.1,12.1,38],[51.5,7.1,46],[50.9,7,47],[50.1,8.7,48],[48.1,11.6,47.5],[48.8,9.2,49],[48,7.85,50],[51,13.7,43],[53.1,8.8,42],[52.4,9.7,43],[51.3,12.4,42],[49.5,11.1,47],[54.3,10.1,39],[47.6,10.7,48.5]];
+function geoid(la,lo){let w=0,n=0;for(const [a,b,v] of GEO){const d=Math.hypot(a-la,(b-lo)*0.65)+0.05,k=1/(d*d);w+=k;n+=k*v}return n/w}
+function altHtml(){
+ const lines=[];
+ if(alt!=null&&lat!=null){const nhn=alt-geoid(lat,lon);lines.push(`<div class="big" style="font-size:calc(var(--s,1)*28px)">${Math.round(nhn)} m</div><div class="unit">ü. NHN / NN (Amsterdamer Pegel)${altAcc?` · ±${Math.round(altAcc)} m`:''}</div><div class="small">GPS-Ellipsoid (WGS84): ${Math.round(alt)} m</div>`)}
+ else lines.push('<div class="small">Höhe: warte auf GPS-Fix</div>');
+ if(ground!=null)lines.push(`<div class="small">Gelände (Karte): ${Math.round(ground)} m ü. NHN</div>`);
+ return lines.join('');
+}
+async function fetchGround(){
+ const r=await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lat}&longitude=${lon}`);if(!r.ok)throw new Error('HTTP '+r.status);
+ const j=await r.json();const v=j.elevation&&j.elevation[0];if(typeof v==='number')ground=v;
+}
 function renderCompass(){
  const h=heading??compassDev;const d=['N','NO','O','SO','S','SW','W','NW'];
  // Rose dreht sich gegen die Fahrtrichtung, daher zeigt der rote Pfeil immer nach Norden
  const rot=h==null?0:-h;
  const svg=`<svg viewBox="0 0 100 100" style="width:110px;height:110px"><g transform="rotate(${rot} 50 50)"><circle cx="50" cy="50" r="46" fill="none" stroke="#2a3644" stroke-width="2"/><text x="50" y="14" font-size="12" font-weight="700" text-anchor="middle" fill="currentColor">N</text><polygon points="50,20 58,54 50,48 42,54" fill="#ff5252"/><polygon points="50,80 58,52 50,58 42,52" fill="currentColor" opacity=".45"/></g></svg>`;
- $('#b-compass').innerHTML=h==null?svg+'<div class="small">keine Richtung</div>':svg+`<div class="small">${d[Math.round(h/45)%8]} · ${Math.round(h)}°</div>`;
+ $('#b-compass').innerHTML=(h==null?svg+'<div class="small">keine Richtung</div>':svg+`<div class="small">${d[Math.round(h/45)%8]} · ${Math.round(h)}°</div>`)+altHtml();
 }
 function renderWeather(){
  if(!S.global.src.weather){$('#b-weather').innerHTML='<div class="small">Wetter aus (Datensparmodus/Schalter)</div>';return}
@@ -295,6 +310,7 @@ function maybeFetch(){
  if(!country&&due('country',60*24)){mark('country');fetchCountry().catch(()=>{})}
  if(!areaPos||hav(areaPos.lat,areaPos.lon,lat,lon)>5000){areaPos={lat,lon};fetchArea().then(()=>{S.last.dwd=0;S.last.heat=0;renderAll()}).catch(()=>{areaPos=null})}
  if(lastLimitPos==null||hav(lastLimitPos.lat,lastLimitPos.lon,lat,lon)>300){lastLimitPos={lat,lon};fetchLimit().then(renderAll).catch(e=>{errs.limit=String(e&&e.message||e).slice(0,80);renderAll();setTimeout(()=>{lastLimitPos=null},60000)})}
+ if(!groundPos||hav(groundPos.lat,groundPos.lon,lat,lon)>300){groundPos={lat,lon};fetchGround().then(renderCompass).catch(()=>{setTimeout(()=>{groundPos=null},120000)})}
  const iv=S.global.iv;
  if(S.global.src.fuel&&due('fuel',iv.fuel)&&(!fuelPos||hav(fuelPos.lat,fuelPos.lon,lat,lon)>1000)){fuelPos={lat,lon};run('fuel',iv.fuel,fetchFuel,()=>{fuelPos=null})}
  if(S.global.src.weather&&due('wx',iv.weather)&&(!wxPos||hav(wxPos.lat,wxPos.lon,lat,lon)>5000)){wxPos={lat,lon};run('wx',iv.weather,fetchWeather,()=>{wxPos=null})}
@@ -323,6 +339,7 @@ function onPos(p){
  if(acc!=null)accel=acc;
  lastPos={lat,lon,t,v};speedKmh=v;
  if(c.heading!=null&&!isNaN(c.heading))heading=c.heading;
+ if(c.altitude!=null&&!isNaN(c.altitude)){alt=c.altitude;altAcc=c.altitudeAccuracy}
  save();renderAll();maybeFetch();
 }
 function onErr(){$('#b-speed').innerHTML='<div class="small">GPS nicht verfügbar – Standortzugriff erlauben</div>'}
