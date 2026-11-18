@@ -358,7 +358,7 @@ function say(t){
  const t0=Date.now();
  Voice.speak({text:t,pitch:+S.global.vpitch,rate:+S.global.vrate,voice:S.global.vname||'',fx:!!S.global.vfx}).catch(e=>toast('Sprachausgabe: '+(e&&e.message||e),6000));
  // Kommt vom Handy kein Ton, wird die Browser-Stimme der App benutzt
- setTimeout(()=>{if(lastSpoke<t0){toast('Sprachausgabe des Handys bleibt stumm – ich versuche die Ersatzstimme. Prüfen: Android-Einstellungen > Text-zu-Sprache.',8000);webSay(t)}},4500);
+ setTimeout(()=>{if(lastSpoke<t0){voiceLast='stumm';const el=$('#vstat');if(el)el.textContent='Status: stumm';toast('Sprachausgabe bleibt stumm. Bitte Medienlautstärke und Android-Einstellungen > Text-zu-Sprache prüfen, oder im Menü den Roboter-Effekt ausschalten.',8000);webSay(t)}},6000);
 }
 function webListen(on){
  if(!on){if(wr){wr.onend=null;try{wr.stop()}catch(_){}wr=null}return true}
@@ -382,11 +382,18 @@ async function setVoice(on){
  }else{voiceOn=false;if(Voice)Voice.stopListening().catch(()=>{});else webListen(false)}
  S.global.voice=voiceOn;save();paintMic();
 }
-function heard(text){
- const t=String(text||'').toLowerCase();
+const WAKE=/(^|[^a-zäöüß])(kitt|kit|kid|kidd|kitty|kiet|kiett|kitte|kitz|kitts|kits|kids)([^a-zäöüß]|$)/;
+let followUntil=0;
+function heard(text,alts){
+ const all=[text].concat(alts||[]).map(x=>String(x||'').toLowerCase());
+ const hit=all.find(x=>WAKE.test(x));
+ const follow=Date.now()<followUntil;
+ if(S.global.wake&&!hit&&!follow)return; // alles ohne Aktivierungswort still ignorieren
+ const t=hit||all[0];
  toast('Du: '+text,4000);
- const wake=/\b(kitt|kit|kid|kitty|kiet|kidd|kiett|kitte)\b/.test(t);
- if(S.global.wake&&!wake)return;
+ const rest=t.replace(WAKE,' ').replace(/[^a-zäöüß0-9 ]/g,' ').trim();
+ if(S.global.wake&&hit&&rest.length<3){followUntil=Date.now()+9000;say(`Ja, ${S.global.anrede||'Michael'}?`);return}
+ followUntil=0;
  say(kittAnswer(t));
 }
 const DIRN=['Norden','Nordosten','Osten','Südosten','Süden','Südwesten','Westen','Nordwesten'];
@@ -721,7 +728,7 @@ $('#b-trip').addEventListener('click',e=>{if(e.target.id==='rtrip2'&&confirm('Ta
 fuelList=S.cache.fuel||[];ab=S.cache.ab||[];
 ['#b-fuel','#b-traffic'].forEach(id=>$(id).addEventListener('change',e=>{const k=e.target.dataset&&e.target.dataset.sc;if(k){S.global[k]=e.target.checked;save();renderAll()}}));
 ['#b-fuel','#b-traffic'].forEach(id=>$(id).addEventListener('click',e=>{const k=e.target.dataset&&e.target.dataset.rf;if(k)refreshNow(k)}));
-if(Voice){Voice.addListener('speech',d=>heard(d.text));Voice.addListener('spoke',()=>{lastSpoke=Date.now()});Voice.addListener('state',d=>{voiceState=d;voiceLast=d.error||(d.speaking?'spricht':d.listening?'hört zu':'bereit');if(d.error)toast('Mikrofon: '+d.error,5000);paintMic();const el=$('#vstat');if(el)el.textContent='Status: '+voiceLast});Voice.voices().then(r=>{voiceList=r.voices||[]}).catch(()=>{})}
+if(Voice){Voice.addListener('speech',d=>heard(d.text,d.alts));Voice.addListener('spoke',d=>{lastSpoke=Date.now();voiceLast='spricht ('+(d.via||'?')+')';const el=$('#vstat');if(el)el.textContent='Status: '+voiceLast});Voice.addListener('state',d=>{voiceState=d;voiceLast=d.error||(d.speaking?'spricht':d.listening?'hört zu':'bereit');if(d.error)toast('Mikrofon: '+d.error,5000);paintMic();const el=$('#vstat');if(el)el.textContent='Status: '+voiceLast});Voice.voices().then(r=>{voiceList=r.voices||[]}).catch(()=>{})}
 $('#mic').onclick=()=>setVoice(!voiceOn);
 document.addEventListener('visibilitychange',()=>{if(!voiceOn||!Voice)return;if(document.visibilityState==='hidden')Voice.stopListening().catch(()=>{});else Voice.listen().catch(()=>{})});
 if(S.global.voice)setVoice(true);
