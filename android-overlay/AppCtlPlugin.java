@@ -39,13 +39,11 @@ public class AppCtlPlugin extends Plugin {
         getContext().startActivity(i);
     }
 
-    @PluginMethod
-    public void launch(PluginCall call) {
-        String q = norm(call.getString("name", ""));
-        if (q.isEmpty()) { call.reject("Kein App-Name"); return; }
+    private ResolveInfo findApp(String name) {
+        String q = norm(name);
+        if (q.isEmpty()) return null;
         PackageManager pm = getContext().getPackageManager();
-        Intent main = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
-        List<ResolveInfo> list = pm.queryIntentActivities(main, 0);
+        List<ResolveInfo> list = pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0);
         ResolveInfo best = null;
         int bestScore = 0;
         for (ResolveInfo ri : list) {
@@ -56,7 +54,14 @@ public class AppCtlPlugin extends Plugin {
             else if (l.contains(q) || q.contains(l) && l.length() > 3) score = 1;
             if (score > bestScore) { bestScore = score; best = ri; }
         }
+        return best;
+    }
+
+    @PluginMethod
+    public void launch(PluginCall call) {
+        ResolveInfo best = findApp(call.getString("name", ""));
         if (best == null) { call.reject("App nicht gefunden"); return; }
+        PackageManager pm = getContext().getPackageManager();
         try {
             Intent li = pm.getLaunchIntentForPackage(best.activityInfo.packageName);
             if (li == null) { call.reject("App nicht startbar"); return; }
@@ -67,6 +72,54 @@ public class AppCtlPlugin extends Plugin {
         } catch (Exception e) {
             call.reject("Start fehlgeschlagen: " + e.getMessage());
         }
+    }
+
+    // ---------- Bedienungshilfe: andere Apps bedienen und beenden ----------
+    @PluginMethod
+    public void accessEnabled(PluginCall call) {
+        JSObject o = new JSObject();
+        o.put("enabled", KittAccessService.inst != null);
+        call.resolve(o);
+    }
+
+    @PluginMethod
+    public void openAccessSettings(PluginCall call) {
+        startNew(new Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS));
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void ui(PluginCall call) {
+        final KittAccessService s = KittAccessService.inst;
+        if (s == null) { call.reject("Bedienungshilfe ist aus"); return; }
+        String a = call.getString("action", "");
+        String t = call.getString("text", "");
+        boolean ok;
+        switch (a) {
+            case "back": case "home": case "recents": case "notifications": ok = s.global(a); break;
+            case "click": ok = s.clickText(t, false); break;
+            case "scroll_down": ok = s.scroll(true); break;
+            case "scroll_up": ok = s.scroll(false); break;
+            case "type": ok = s.type(t); break;
+            case "closeapp": {
+                String name = call.getString("name", "");
+                PackageManager pm = getContext().getPackageManager();
+                String pkg;
+                if (name.isEmpty()) pkg = KittAccessService.fgPkg;
+                else { ResolveInfo ri = findApp(name); pkg = ri == null ? "" : ri.activityInfo.packageName; }
+                if (pkg == null || pkg.isEmpty()) { call.reject("keine passende App"); return; }
+                String label = pkg;
+                try { label = String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0))); } catch (Exception ignored) { }
+                final String lb = label;
+                s.forceStop(pkg, (done, msg) -> {
+                    if (done) { JSObject o = new JSObject(); o.put("label", lb); call.resolve(o); }
+                    else call.reject(msg);
+                });
+                return;
+            }
+            default: call.reject("Unbekannte Aktion"); return;
+        }
+        if (ok) call.resolve(); else call.reject("nicht gefunden");
     }
 
     @PluginMethod

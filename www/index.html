@@ -101,7 +101,7 @@ const TAB={DE:{urban:50,rural:100,motorway:130},AT:{urban:50,rural:100,motorway:
 FR:{urban:50,rural:80,motorway:130},IT:{urban:50,rural:90,motorway:130},NL:{urban:50,rural:80,motorway:100},PL:{urban:50,rural:90,motorway:140}};
 const WX={0:'Sonne',1:'überwiegend sonnig',2:'teils bewölkt',3:'bedeckt',45:'Nebel',48:'Nebel',51:'Niesel',53:'Niesel',55:'Niesel',61:'Regen',63:'Regen',65:'starker Regen',71:'Schnee',73:'Schnee',75:'starker Schnee',80:'Schauer',81:'Schauer',82:'starke Schauer',95:'Gewitter',96:'Gewitter mit Hagel',99:'Gewitter mit Hagel'};
 // Abfrage-Intervalle in Minuten; Datenquellen einzeln schaltbar, Datensparmodus schaltet alle Abrufe ab.
-const DEF={global:{analog:false,awake:true,orient:'off',tol:5,tpl:'{speed} km/h · {temp}°C · Limit {limit}',sparmodus:false,style:'digital',voice:false,vmode:'push',vvol:80,vname:'',scFuel:false,scTraffic:false,wake:true,appCtl:true,btMic:false,keepAlive:false,obdOn:false,obdType:'bt',obdAddr:'',obdHost:'192.168.0.10',obdPort:35000,anrede:'Michael',vpitch:0.85,vrate:0.95,
+const DEF={global:{analog:false,awake:true,orient:'off',tol:5,tpl:'{speed} km/h · {temp}°C · Limit {limit}',sparmodus:false,style:'digital',voice:false,vmode:'push',vvol:80,vname:'',scFuel:false,scTraffic:false,wake:true,appCtl:true,uiCtl:false,btMic:false,keepAlive:false,obdOn:false,obdType:'bt',obdAddr:'',obdHost:'192.168.0.10',obdPort:35000,anrede:'Michael',vpitch:0.85,vrate:0.95,
  src:{weather:true,dwd:true,fuel:true,limit:true,heat:true,sat:true,autobahn:true},iv:{weather:30,dwd:15,fuel:30},fuelKm:5,},
  widgets:{},trip:{total:0,trip:0},day:{d:'',max:0,mt:0,dist:0},reports:[],last:{}};
 WIDGETS.forEach(w=>DEF.widgets[w.id]={on:true,color:'#e8eef5',scale:1});
@@ -620,12 +620,28 @@ function kittAnswer(t){
   if(/batterie|bordspannung|spannung/.test(c))return ov('volt','Die Bordspannung beträgt','Volt',1);
   if(/motorlast|auslastung/.test(c))return ov('load','Die Motorlast beträgt','Prozent');
  }
+ if(S.global.uiCtl&&AppCtl){
+  const need='Dafür muss die Bedienungshilfe für KITT in den Android-Einstellungen eingeschaltet sein.';
+  const U=(a,x)=>AppCtl.ui(Object.assign({action:a},x||{}));
+  const fail=e=>/Bedienungshilfe/.test(String(e&&e.message||e))?need:'Das hat nicht geklappt: '+(e&&e.message||e);
+  if(/^(zurück|geh zurück|gehe zurück|eine seite zurück|zurückgehen)$/.test(c))return U('back').then(()=>'Zurück.').catch(fail);
+  if(/^(benachrichtigungen|benachrichtigungen öffnen)$/.test(c))return U('notifications').then(()=>'Benachrichtigungen.').catch(fail);
+  if(/^(letzte apps|app übersicht|übersicht)$/.test(c))return U('recents').then(()=>'Letzte Apps.').catch(fail);
+  let m=c.match(/^(?:tippe ein|schreibe|schreib)\s+(.+)$/);
+  if(m)return U('type',{text:m[1]}).then(()=>'Geschrieben.').catch(e=>/Bedienungshilfe/.test(String(e&&e.message||e))?need:'Ich finde kein aktives Textfeld.');
+  if(/scroll|blättere|wisch/.test(c)){const down=/unten|runter|weiter/.test(c);return U(down?'scroll_down':'scroll_up').then(()=>down?'Nach unten.':'Nach oben.').catch(e=>/Bedienungshilfe/.test(String(e&&e.message||e))?need:'Hier lässt sich nichts scrollen.')}
+  m=c.match(/^(?:tippe|klicke|klick|drücke|drück)\s+(?:mal |bitte )*(?:auf |den |die |das )*(.+)$/);
+  if(m)return U('click',{text:m[1]}).then(()=>`Ich tippe auf ${m[1]}.`).catch(e=>/Bedienungshilfe/.test(String(e&&e.message||e))?need:`Ich finde „${m[1]}“ nicht auf dem Bildschirm.`);
+  m=c.match(/^(?:schließe|schließen|beende|beenden)\s+(?:die |den |das |mal |bitte )*(?:app\s*)?(.*)$/);
+  if(m){const nm=m[1].replace(/^(aktuelle app|aktuelle|diese app|diese|app)$/,'').trim();
+   return U('closeapp',{name:nm}).then(r=>`${r.label} wurde beendet.`).catch(e=>/Bedienungshilfe/.test(String(e&&e.message||e))?need:'Das Beenden hat nicht geklappt: '+(e&&e.message||e))}
+ }
  if(S.global.appCtl&&AppCtl){
   let m=c.match(/^(?:öffne|öffnen|starte|starten|mach auf|zeig mir|zeige|rufe auf)\s+(?:die |den |das |mal |bitte )*(?:app )?(.+)$/);
   if(m&&!/tour|pursuit|scanner/.test(m[1])){const nm=m[1].replace(/ app$/,'');return AppCtl.launch({name:nm}).then(r=>`Ich öffne ${r.label}.`).catch(()=>`Ich finde keine App namens ${nm}.`)}
   m=c.match(/(?:navigiere|navigation|bring mich|route|fahr)\s+(?:mich\s+)?(?:nach|zu|zum|zur)\s+(.+)$/);
   if(m){return AppCtl.navigate({query:m[1]}).then(()=>`Navigation nach ${m[1]} gestartet.`).catch(()=>'Ich finde keine Navigations-App.')}
-  if(/startbildschirm|home screen|schließe die app|beende die app|app schließen|app beenden|zurück zum home/.test(c)){AppCtl.home().catch(()=>{});return 'Ich gehe zum Startbildschirm. Andere Apps kann ich nicht beenden, das erlaubt Android nicht.'}
+  if(/startbildschirm|home screen|schließe die app|beende die app|app schließen|app beenden|zurück zum home/.test(c)){AppCtl.home().catch(()=>{});return 'Ich gehe zum Startbildschirm. Zum Beenden schalte unter Fahrzeug und Apps „Andere Apps bedienen und schließen“ ein.'}
   if(/dashboard|zurück zu kitt|zurück zur app/.test(c)){AppCtl.front().catch(()=>{});return `Zurück zum Dashboard, ${A}.`}
   if(/musik|lied|titel|song/.test(c)){
    const k=/pause|stopp|stop|anhalten/.test(c)?'pause':/nächst|überspring|vor/.test(c)?'next':/vorher|zurück/.test(c)?'prev':/abspiel|weiter|fortsetz|start|spiel/.test(c)?'play':'toggle';
@@ -930,6 +946,7 @@ function buildPanel(){
  <p>Tacho-Stil: Unter „Allgemein“ wählst du Digital, Analog, Rund, Sport, Racer, Robust, Neutral oder Verspielt. Die Querformat-Stile füllen die ganze Breite.</p>
  <p>KITT: Mikrofon antippen und sprechen, z. B. „Wie schnell fahre ich?“, „Wetter“, „Tankstelle“, „Stau“, „Höhe“, „Witz“ oder „Super Pursuit Mode“.</p>
  <p>Aktivierungswort: Unter „Betriebsart“ auf „Immer bereit“ stellen, dann reagiert die App nur auf „KITT“.</p>
+ <p>Andere Apps bedienen: Schalter „Andere Apps bedienen und schließen“ einschalten, dann „Bedienungshilfe prüfen und öffnen“ und KITT in Android einschalten. Auf neueren Androiden vorher in den App-Infos „Eingeschränkte Einstellungen zulassen“ wählen. Befehle: „zurück“, „tippe auf …“, „scrolle nach unten“, „schreibe …“, „schließe Spotify“, „schließe die App“, „Benachrichtigungen“. Die Bedienungshilfe reagiert nur auf deine Sprachbefehle.</p>
  <p>Apps: Sage „KITT, öffne Spotify“, „Musik pause“, „nächster Titel“, „lauter“, „navigiere nach …“ oder „Startbildschirm“. Fremde Apps schließen und darin tippen erlaubt Android nicht.</p>
  <p>OBD2: ELM327-Adapter in Android koppeln, unter „Fahrzeug &amp; Apps“ wählen und verbinden. Dann „KITT, Fehler auslesen“, „Drehzahl“ oder „Kühlmitteltemperatur“. Löschen verlangt eine Bestätigung.</p>
  <p>Trip: Der Knopf unter der Trip-Anzeige setzt die Tagesstrecke auf null. Tankstellen und Stau kannst du mit „Aktualisieren“ sofort neu abrufen.</p>
@@ -954,6 +971,8 @@ function buildPanel(){
  <div class="row"><label>Toleranz km/h</label><input type="number" min="0" max="30" data-g="tol" value="${S.global.tol}" style="width:70px"></div>
  <h3>Fahrzeug &amp; Apps</h3>
  <div class="row"><label>Apps per Sprache öffnen und steuern</label><input type="checkbox" data-g="appCtl" ${S.global.appCtl?'checked':''}></div>
+ <div class="row"><label>Andere Apps bedienen und schließen</label><input type="checkbox" data-g="uiCtl" ${S.global.uiCtl?'checked':''}></div>
+ <div class="row"><button id="accopen">Bedienungshilfe prüfen und öffnen</button></div>
  <div class="row"><label>Bluetooth-Headset als Mikrofon</label><input type="checkbox" data-g="btMic" ${S.global.btMic?'checked':''}></div>
  <div class="row"><label>Im Hintergrund weiter zuhören</label><input type="checkbox" data-g="keepAlive" ${S.global.keepAlive?'checked':''}></div>
  <div class="row"><label>OBD2 verwenden</label><input type="checkbox" data-g="obdOn" ${S.global.obdOn?'checked':''}></div>
@@ -1011,6 +1030,7 @@ $('#panel').addEventListener('click',async e=>{const id=e.target.id;
  if(id==='close')$('#menu').classList.remove('open');
  if(id==='addrep'){const v=$('#rep').value.trim();if(v){S.reports.unshift({t:Date.now(),txt:v});S.reports=S.reports.slice(0,20);save();$('#rep').value='';renderAll()}}
  if(id==='rtrip'){S.trip.trip=0;save();renderAll()}
+ if(id==='accopen'){if(!AppCtl){toast('Nur in der APK');return}AppCtl.accessEnabled().then(r=>{if(r.enabled)toast('Bedienungshilfe ist an, KITT kann andere Apps bedienen',6000);else{AppCtl.openAccessSettings();toast('Dort „KITT“ (GPS-Dashboard) wählen und einschalten',9000)}})}
  if(id==='obdscan'){if(!Obd){toast('Nur in der APK');return}Obd.devices().then(r=>{OBDDEV=r.devices||[];const g=OBDDEV.find(d=>/obd|elm|vlink|veepeak|vgate|konnwei/i.test(d.name||''));if(g&&!S.global.obdAddr){S.global.obdAddr=g.address;save()}buildPanel();toast(OBDDEV.length?OBDDEV.length+' gekoppelte Geräte':'Keine gekoppelten Geräte. Adapter zuerst in den Android-Bluetooth-Einstellungen koppeln.',6000)}).catch(e=>toast('Bluetooth: '+(e&&e.message||e),6000))}
  if(id==='obdconn'){S.global.obdOn=true;save();$('#menu').classList.remove('open');obdConnect()}
  if(id==='vpurs'){unlockAudio();playPursuit()}

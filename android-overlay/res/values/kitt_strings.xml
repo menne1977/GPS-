@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="kitt_acc_desc">Damit KITT auf deinen Sprachbefehl hin andere Apps bedienen oder beenden kann (zurück, tippen, scrollen, App beenden). Es wird nichts gespeichert oder übertragen.</string>
+</resources>
