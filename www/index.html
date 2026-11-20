@@ -17,6 +17,8 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font-family
 .small{font-size:calc(var(--s,1)*13px);color:var(--mut);margin-top:4px}
 .alert{display:none;position:absolute;top:0;left:0;right:0;padding:4px;background:var(--warn);color:#000;font-weight:700;font-size:13px;border-radius:14px 14px 0 0}
 .analog{width:100%;max-width:230px}
+.allgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:6px;width:100%}
+.allgrid .tile{background:var(--bg,#0b1118);border-radius:10px;padding:6px;text-align:center}
 .rg{width:100%;max-width:300px;height:auto}
 .th{width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box;padding:4px}
 .th-num{font-weight:900;line-height:1;font-size:calc(var(--s,1)*96px);font-variant-numeric:tabular-nums}
@@ -88,7 +90,10 @@ const WIDGETS=[
 {id:'sat',name:'GPS-Satelliten',base:260},
 {id:'fuel',name:'Tankstellen (ohne Preise)',base:280},
 {id:'traffic',name:'Stau-Meldungen',base:260},
-{id:'custom',name:'Eigene Anzeige',base:220}];
+{id:'custom',name:'Eigene Anzeige',base:220},
+{id:'all',name:'Alle Werte',base:520},
+{id:'tour',name:'Tour & Pausen',base:260}];
+const PAUSE_H=2;
 // Richtwerte je Land (km/h): Ortschaft, Landstraße, Autobahn. Nur Fallback ohne OSM-Angabe.
 const TAB={DE:{urban:50,rural:100,motorway:130},AT:{urban:50,rural:100,motorway:130},CH:{urban:50,rural:80,motorway:120},
 FR:{urban:50,rural:80,motorway:130},IT:{urban:50,rural:90,motorway:130},NL:{urban:50,rural:80,motorway:100},PL:{urban:50,rural:90,motorway:140}};
@@ -101,6 +106,7 @@ WIDGETS.forEach(w=>DEF.widgets[w.id]={on:true,color:'#e8eef5',scale:1});
 function load(){try{const x=JSON.parse(localStorage.getItem('gpsdash')||'null');if(x){const d=structuredClone(DEF);return Object.assign(d,x,{global:Object.assign(d.global,x.global,{src:Object.assign(d.global.src,x.global?.src||{}),iv:Object.assign(d.global.iv,x.global?.iv||{})}),widgets:Object.assign(d.widgets,x.widgets),trip:Object.assign(d.trip,x.trip),day:Object.assign(d.day,x.day)})}}catch(e){}return structuredClone(DEF)}
 let S=load();
 S.cache=Object.assign({fuel:[],ab:[],t:{}},S.cache||{});
+S.tour=Object.assign({on:false,start:0,dist:0,mt:0,since:0,stopT:0,warned:false},S.tour||{});
 if(S.global.analog){S.global.style='analog';S.global.analog=false}
 function save(){try{localStorage.setItem('gpsdash',JSON.stringify(S))}catch(e){}}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
@@ -109,7 +115,7 @@ function hav(a,b,c,d){const R=6371000,r=x=>x*Math.PI/180;const dA=r(c-a),dB=r(d-
 // Zustand
 let speedKmh=0,accel=null,zeroRes=null,gForce=0,heading=null,compassDev=null,limit=null,limitSrc='',fuelList=[],wx=null,warn=null,lat=null,lon=null,lastPos=null,zeroT=null;
 let gpsAcc=null,alt=null,altAcc=null,ground=null,groundPos=null;
-let fuelPos=null,wxPos=null,lastLimitPos=null,area=null,areaPos=null;
+let limitT=0,fuelPos=null,wxPos=null,lastLimitPos=null,area=null,areaPos=null;
 
 WIDGETS.forEach(w=>{const d=document.createElement('div');d.className='w';d.id='w-'+w.id;d.innerHTML=`<div class="alert" id="al-${w.id}"></div><h4>${w.name}</h4><div id="b-${w.id}"></div>`;$('#app').appendChild(d)});
 
@@ -154,7 +160,8 @@ function renderSpeed(){
  const over=limit!=null&&v>limit+S.global.tol;
  const al=$('#al-speed');al.style.display=over?'block':'none';if(over)al.textContent=`ÜBER DEM LIMIT +${Math.round(v-limit)} km/h`;
 }
-function renderLimit(){$('#b-limit').innerHTML=`<div class="big">${limit??'–'}</div><div class="unit">km/h</div><div class="small">${esc(roadType||(limit==null?limitSrc:''))}</div>${errHtml('limit')}`}
+function renderLimit(){$('#b-limit').innerHTML=`<div class="big">${limit??'–'}</div><div class="unit">km/h</div><div class="small">${esc(roadType||(limit==null?limitSrc:''))}</div>${errHtml('limit')}${standHtml('limit')}<button class="rf" data-rf="limit">Aktualisieren</button>`}
+$('#b-limit').addEventListener('click',e=>{const k=e.target.dataset&&e.target.dataset.rf;if(k)refreshNow(k)});
 function renderAccel(){$('#b-accel').innerHTML=`<div class="big">${accel==null?'–':accel.toFixed(1)}</div><div class="unit">m/s² (GPS)</div><div class="small">0–100: ${zeroRes?zeroRes.toFixed(1)+' s':'–'} · Sensor: ${gForce.toFixed(2)} g</div>`}
 function setHtml(el,h){if(el._h===h)return;const o=el.querySelector('.scr'),top=o?o.scrollTop:0;el._h=h;el.innerHTML=h;if(top){const n=el.querySelector('.scr');if(n)n.scrollTop=top}}
 function renderTrip(){setHtml($('#b-trip'),`<div class="big">${S.trip.trip.toFixed(1)}</div><div class="unit">km Tagesstrecke</div><div class="small">Gesamt ${S.trip.total.toFixed(0)} km</div><button id="rtrip2" style="margin-top:6px">Auf 0 setzen</button>`)}
@@ -548,22 +555,50 @@ function kittAnswer(t){
  return `Das habe ich nicht verstanden, ${A}.`;
 }
 
-function renderAll(){renderSpeed();renderLimit();renderAccel();renderTrip();renderDay();renderCompass();renderWeather();renderWarn();renderHeat();renderSat();renderFuel();renderTraffic();renderCustom()}
+function renderTour(){
+ const T=S.tour,el=$('#b-tour');
+ const dur=T.on?(Date.now()-T.start)/60000:0;
+ const avg=T.mt>0?T.dist/(T.mt/3600000):0;
+ const brk=T.on&&T.since?Math.round((Date.now()-T.since)/60000):0;
+ setHtml(el,`<div class="big" style="font-size:calc(var(--s,1)*40px)">${T.dist.toFixed(1)}</div><div class="unit">km Tour</div>
+ <div class="small">${T.on?'Dauer '+Math.round(dur)+' min · Ø '+Math.round(avg)+' km/h':'Nicht gestartet'}</div>
+ <div class="small">${T.on?'Seit letzter Pause '+brk+' min':''}${T.on&&brk>=PAUSE_H*60?' <span style="color:var(--warn)">Pause fällig</span>':''}</div>
+ <button class="tour" data-tour="${T.on?'stop':'start'}">${T.on?'Tour beenden':'Tour starten'}</button>`);
+}
+function renderAllValues(){
+ const v=speedKmh,nhn=(alt!=null&&lat!=null)?alt-geoid(lat,lon):null,used=sats?sats.sats.filter(x=>x.used).length:null;
+ const L=fuelSorted(),sec=(s)=>s==null?'–':s;
+ const tiles=[
+  ['Tempo',Math.round(v),'km/h'],['Erlaubt',limit??'–','km/h'],['Beschleunigung',accel==null?'–':de(accel),'m/s²'],['0–100',zeroRes?de(zeroRes):'–','s'],
+  ['Bremsen',accel!=null&&accel<-0.5?de(-accel):'0','m/s²'],['Heute max',Math.round(S.day.max),'km/h'],['Heute km',de(S.day.dist),'km'],['Trip',de(S.trip.trip),'km'],['Gesamt',Math.round(S.trip.total),'km'],
+  ['Höhe NN',nhn==null?'–':Math.round(nhn),'m'],['Kurs',cmpCur==null?'–':Math.round(cmpCur),'Grad'],['GPS Genauigkeit',gpsAcc==null?'–':Math.round(gpsAcc),'m'],['Satelliten',used==null?'–':used+' / '+sats.visible,''],
+  ['Temperatur',wx?Math.round(wx.cur.temperature_2m):'–','°C'],['Böen',wx?Math.round(wx.cur.wind_gusts_10m):'–','km/h'],['Regen',wx?wx.pp[0]:'–','%'],
+  ['DWD-Warnungen',(warn||[]).length,''],['Hitze',(heat||[]).length,''],['Tankstellen',L.length,L.length?'nächste '+de(L[0].d)+' km':''],['Autobahn-Meldungen',ab.length,''],
+  ['Tour km',de(S.tour.dist),'km']
+ ];
+ $('#b-all').innerHTML=`<div class="allgrid">`+tiles.map(([a,b,c])=>`<div class="tile"><div class="small">${a}</div><div style="font-size:calc(var(--s,1)*22px);font-weight:700">${b}</div><div class="small">${c}</div></div>`).join('')+`</div>`;
+}
+function renderAll(){renderSpeed();renderLimit();renderAccel();renderTrip();renderDay();renderCompass();renderWeather();renderWarn();renderHeat();renderSat();renderFuel();renderTraffic();renderCustom();renderAllValues();renderTour()}
+$('#b-tour').addEventListener('click',e=>{const a=e.target.dataset&&e.target.dataset.tour;if(!a)return;
+ if(a==='start'){S.tour={on:true,start:Date.now(),dist:0,mt:0,since:Date.now(),stopT:0,warned:false}}
+ else{S.tour.on=false}
+ save();renderTour()});
+setInterval(()=>{if(S.tour.on)renderTour()},30000);
 
 // Abrufe (nur mit Schalter an, im Intervall)
 // Overpass: drei Spuren (je ein Server zuerst), damit Tempolimit, Tankstellen und Autobahn gleichzeitig laufen; bei Fehler Ersatzserver
 const OV=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.private.coffee/api/interpreter'];
 const ovLane=[Promise.resolve(),Promise.resolve(),Promise.resolve()];
-function ov(q,lane=0){const p=ovLane[lane].then(()=>ovTry(q,lane));ovLane[lane]=p.catch(()=>{});return p}
+function ov(q,lane=0,hedge=3000){const p=ovLane[lane].then(()=>ovTry(q,lane,hedge));ovLane[lane]=p.catch(()=>{});return p}
 // Gestaffelt: erster Server sofort, bei Fehler oder nach 3 s zusätzlich der nächste; der erste Treffer gewinnt
-function ovTry(q,start){
+function ovTry(q,start,hedge){
  return new Promise((resolve,reject)=>{
   let done=false,failed=0,next=0,last='';const timers=[],ctl=new AbortController();
   const fin=(fn,v)=>{if(done)return;done=true;timers.forEach(clearTimeout);try{ctl.abort()}catch(_){}fn(v)};
   const go=()=>{
    if(done||next>=OV.length)return;
    const u=OV[(start+next)%OV.length],h=new URL(u).host;next++;
-   timers.push(setTimeout(go,3000));
+   timers.push(setTimeout(go,hedge));
    fetch(u+'?data='+encodeURIComponent(q),{signal:ctl.signal})
     .then(r=>{if(!r.ok)throw new Error(h+' HTTP '+r.status);return r.json()})
     .then(j=>fin(resolve,j))
@@ -591,6 +626,7 @@ let country=null;
 // Straßenart aus OSM: Autobahn, Landstraße oder Straße (innerorts)
 const CAR=/^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street|service|road)$/;
 let roadType='';
+if(S.cache.limit){limit=S.cache.limit.v;limitSrc=S.cache.limit.src;roadType=S.cache.limit.road}
 function roadKind(t){
  const h=t.highway||'',zone=[t.maxspeed,t['maxspeed:type'],t['zone:maxspeed'],t['source:maxspeed']].join(' ');
  if(/^motorway/.test(h))return 'Autobahn';
@@ -603,10 +639,11 @@ function roadKind(t){
 }
 async function fetchLimit(){
  if(!S.global.src.limit)return;
- const j=await ov(`[out:json][timeout:10];way(around:25,${lat},${lon})["highway"];out tags 10;`);
+ const j=await ov(`[out:json][timeout:8];way(around:25,${lat},${lon})["highway"];out tags 10;`,0,1200);
  const el=(j.elements||[]).filter(e=>CAR.test(e.tags.highway||''));delete errs.limit;
  if(!el.length){limit=null;roadType='';limitSrc='keine Straße erkannt';return}
  const w=el.find(e=>e.tags.maxspeed)||el[0];const p=parseLimit(w.tags,country);limit=p.v;limitSrc=p.src;roadType=roadKind(w.tags);
+ S.cache.limit={v:limit,src:limitSrc,road:roadType};S.cache.t.limit=Date.now();save();
 }
 async function fetchCountry(){const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&zoom=3&lat=${lat}&lon=${lon}`,{headers:{'Accept-Language':'de'}});const j=await r.json();country=(j.address?.country_code||'').toUpperCase()||null}
 async function fetchFuel(){
@@ -675,7 +712,7 @@ function rfBtn(key){return `<button class="rf" data-rf="${key}">Aktualisieren</b
 // Sofort-Abfrage: setzt die Sperren zurück und startet die Abrufe ohne Wartezeit
 function refreshNow(keys){
  if(lat==null){toast('Noch kein Standort – bitte kurz warten');return}
- [].concat(keys).forEach(k=>{delete errs[k];S.last[k]=0;fz[k]=false;if(k==='fuel')fuelPos=null;if(k==='ab')abPos=null;if(k==='wx')wxPos=null});
+ [].concat(keys).forEach(k=>{delete errs[k];S.last[k]=0;fz[k]=false;if(k==='limit')lastLimitPos=null;if(k==='fuel')fuelPos=null;if(k==='ab')abPos=null;if(k==='wx')wxPos=null});
  const sp=S.global.sparmodus;S.global.sparmodus=false;maybeFetch();S.global.sparmodus=sp;renderAll();
 }
 function errHtml(key){return errs[key]?`<div class="small" style="color:var(--warn)">nicht erreichbar: ${esc(errs[key])}</div>`:''}
@@ -683,7 +720,7 @@ function maybeFetch(){
  if(S.global.sparmodus)return;
  if(!country&&due('country',60*24)){mark('country');fetchCountry().catch(()=>{})}
  if(!areaPos||hav(areaPos.lat,areaPos.lon,lat,lon)>5000){areaPos={lat,lon};fetchArea().then(()=>{S.last.dwd=0;S.last.heat=0;renderAll()}).catch(()=>{areaPos=null})}
- if(lastLimitPos==null||hav(lastLimitPos.lat,lastLimitPos.lon,lat,lon)>300){lastLimitPos={lat,lon};fetchLimit().then(renderAll).catch(e=>{errs.limit=String(e&&e.message||e).slice(0,80);renderAll();setTimeout(()=>{lastLimitPos=null},60000)})}
+ if(lastLimitPos==null||hav(lastLimitPos.lat,lastLimitPos.lon,lat,lon)>150||Date.now()-limitT>45000){lastLimitPos={lat,lon};fetchLimit().then(()=>{limitT=Date.now();renderAll()}).catch(e=>{errs.limit=String(e&&e.message||e).slice(0,80);renderAll();setTimeout(()=>{lastLimitPos=null},60000)})}
  if(!groundPos||hav(groundPos.lat,groundPos.lon,lat,lon)>300){groundPos={lat,lon};fetchGround().then(renderCompass).catch(()=>{setTimeout(()=>{groundPos=null},120000)})}
  const iv=S.global.iv;
  if(S.global.src.fuel&&need('fuel',iv.fuel,fuelPos,20000,1000)){fz.fuel=true;fuelPos={lat,lon};run('fuel',iv.fuel,fetchFuel,()=>{fuelPos=null})}
@@ -699,11 +736,17 @@ function onPos(p){
  let v=(c.speed!=null&&c.speed>=0)?c.speed*3.6:null,acc=null;
  if(lastPos){
   const dt=(t-lastPos.t)/1000,d=hav(lastPos.lat,lastPos.lon,lat,lon);
-  if(c.accuracy<50&&d>3){S.trip.total+=d/1000;S.trip.trip+=d/1000;S.day.dist+=d/1000}
+  if(c.accuracy<50&&d>3){S.trip.total+=d/1000;S.trip.trip+=d/1000;S.day.dist+=d/1000;if(S.tour.on)S.tour.dist+=d/1000}
   if(v==null&&dt>0)v=(d/dt)*3.6;
   if(dt>0&&v!=null&&lastPos.v!=null)acc=(v-lastPos.v)/3.6/dt;
  }
  if(v==null)v=0;
+ if(S.tour.on){
+  if(lastPos&&v>=3)S.tour.mt+=Math.min(t-lastPos.t,60000);
+  if(v<3){if(!S.tour.stopT)S.tour.stopT=t;if(t-S.tour.stopT>600000){S.tour.since=t;S.tour.warned=false}}else S.tour.stopT=0;
+  if(!S.tour.since)S.tour.since=t;
+  if(!S.tour.warned&&v>=3&&t-S.tour.since>PAUSE_H*3600000){S.tour.warned=true;say(`${S.global.anrede||'Michael'}, du bist seit zwei Stunden unterwegs. Zeit für eine Pause.`)}
+ }
  const today=new Date().toDateString();
  if(S.day.d!==today)S.day={d:today,max:0,mt:0,dist:0};
  if(c.accuracy<50&&v<250&&v>S.day.max)S.day.max=v;
