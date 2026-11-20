@@ -93,6 +93,7 @@ const WIDGETS=[
 {id:'custom',name:'Eigene Anzeige',base:220},
 {id:'all',name:'Motorrad-Tasche',base:520},
 {id:'range',name:'Tankreichweite',base:220},
+{id:'obd',name:'Fahrzeug (OBD2)',base:300},
 {id:'tour',name:'Tour & Pausen',base:260}];
 const PAUSE_H=2;
 // Richtwerte je Land (km/h): Ortschaft, Landstraße, Autobahn. Nur Fallback ohne OSM-Angabe.
@@ -100,7 +101,7 @@ const TAB={DE:{urban:50,rural:100,motorway:130},AT:{urban:50,rural:100,motorway:
 FR:{urban:50,rural:80,motorway:130},IT:{urban:50,rural:90,motorway:130},NL:{urban:50,rural:80,motorway:100},PL:{urban:50,rural:90,motorway:140}};
 const WX={0:'Sonne',1:'überwiegend sonnig',2:'teils bewölkt',3:'bedeckt',45:'Nebel',48:'Nebel',51:'Niesel',53:'Niesel',55:'Niesel',61:'Regen',63:'Regen',65:'starker Regen',71:'Schnee',73:'Schnee',75:'starker Schnee',80:'Schauer',81:'Schauer',82:'starke Schauer',95:'Gewitter',96:'Gewitter mit Hagel',99:'Gewitter mit Hagel'};
 // Abfrage-Intervalle in Minuten; Datenquellen einzeln schaltbar, Datensparmodus schaltet alle Abrufe ab.
-const DEF={global:{analog:false,awake:true,orient:'off',tol:5,tpl:'{speed} km/h · {temp}°C · Limit {limit}',sparmodus:false,style:'digital',voice:false,vmode:'push',vvol:80,vname:'',scFuel:false,scTraffic:false,wake:true,anrede:'Michael',vpitch:0.85,vrate:0.95,
+const DEF={global:{analog:false,awake:true,orient:'off',tol:5,tpl:'{speed} km/h · {temp}°C · Limit {limit}',sparmodus:false,style:'digital',voice:false,vmode:'push',vvol:80,vname:'',scFuel:false,scTraffic:false,wake:true,appCtl:true,btMic:false,keepAlive:false,obdOn:false,obdType:'bt',obdAddr:'',obdHost:'192.168.0.10',obdPort:35000,anrede:'Michael',vpitch:0.85,vrate:0.95,
  src:{weather:true,dwd:true,fuel:true,limit:true,heat:true,sat:true,autobahn:true},iv:{weather:30,dwd:15,fuel:30},fuelKm:5,},
  widgets:{},trip:{total:0,trip:0},day:{d:'',max:0,mt:0,dist:0},reports:[],last:{}};
 WIDGETS.forEach(w=>DEF.widgets[w.id]={on:true,color:'#e8eef5',scale:1});
@@ -388,7 +389,7 @@ function cockpit(v){
 }
 
 // ===== Sprachassistent (Mikrofon + Sprachausgabe); in der APK über das Plugin "Voice" =====
-const Voice=window.Capacitor?.Plugins?.Voice;
+const Voice=window.Capacitor?.Plugins?.Voice,AppCtl=window.Capacitor?.Plugins?.AppCtl,Obd=window.Capacitor?.Plugins?.Obd;
 let voiceLast='aus',voiceList=[],voiceOn=false,voiceState={listening:false,speaking:false},wr=null;
 const WR=window.SpeechRecognition||window.webkitSpeechRecognition;
 const de=(x,d=1)=>(Math.round(x*10**d)/10**d).toFixed(d).replace('.',',').replace(/,0+$/,'');
@@ -429,6 +430,7 @@ function talkOnce(){
  voiceState.listening=true;paintMic();try{r.start()}catch(_){}
 }
 async function setVoice(on){
+ if(AppCtl&&S.global.keepAlive)AppCtl.keepAlive({on}).catch(()=>{});
  if(on){
   try{
    if(Voice)await Voice.listen();else if(!webListen(true)){on=false}
@@ -451,8 +453,93 @@ function heard(text,alts){
  const rest=t.replace(WAKE,' ').replace(/[^a-zäöüß0-9 ]/g,' ').trim();
  if(need&&hit&&rest.length<3){followUntil=Date.now()+9000;say(`Ja, ${S.global.anrede||'Michael'}?`);return}
  followUntil=0;
- say(kittAnswer(t));
+ Promise.resolve(kittAnswer(t)).then(a=>{if(a)say(a)}).catch(e=>say('Das hat nicht geklappt: '+(e&&e.message||e)));
 }
+
+// ===== OBD2 (ELM327): Echtzeitwerte, Fehler lesen und löschen =====
+let OBDDEV=[];
+const OBD={can:true,on:false,vals:{},fails:{},dtc:null,pend:null,dtcT:0,err:'',timer:0,confirmUntil:0};
+const PIDS=[['010C','rpm',r=>(r[0]*256+r[1])/4],['010D','spd',r=>r[0]],['0105','cool',r=>r[0]-40],['015C','oil',r=>r[0]-40],['010F','iat',r=>r[0]-40],['0111','thr',r=>r[0]*100/255],['0104','load',r=>r[0]*100/255],['012F','fuel',r=>r[0]*100/255],['0142','volt',r=>(r[0]*256+r[1])/1000],['015E','rate',r=>(r[0]*256+r[1])/20]];
+const DTCTXT={P0100:'Luftmassenmesser Schaltkreis',P0101:'Luftmassenmesser Messbereich',P0113:'Ansauglufttemperatur Signal hoch',P0117:'Kühlmitteltemperatur Signal niedrig',P0118:'Kühlmitteltemperatur Signal hoch',P0128:'Kühlmitteltemperatur unter Thermostat-Solltemperatur',P0130:'Lambdasonde Bank 1 Sensor 1',P0135:'Lambdasonde Heizung Bank 1 Sensor 1',P0171:'Gemisch zu mager Bank 1',P0172:'Gemisch zu fett Bank 1',P0174:'Gemisch zu mager Bank 2',P0300:'Zufällige Zündaussetzer',P0301:'Zündaussetzer Zylinder 1',P0302:'Zündaussetzer Zylinder 2',P0303:'Zündaussetzer Zylinder 3',P0304:'Zündaussetzer Zylinder 4',P0305:'Zündaussetzer Zylinder 5',P0306:'Zündaussetzer Zylinder 6',P0335:'Kurbelwellensensor',P0340:'Nockenwellensensor',P0401:'AGR Durchfluss zu gering',P0420:'Katalysator Wirkungsgrad Bank 1 zu niedrig',P0430:'Katalysator Wirkungsgrad Bank 2 zu niedrig',P0442:'Tankentlüftung kleines Leck',P0455:'Tankentlüftung großes Leck',P0500:'Geschwindigkeitssensor',P0505:'Leerlaufregelung',P0562:'Systemspannung niedrig',P0563:'Systemspannung hoch',P0700:'Getriebesteuerung Fehler',P2002:'Partikelfilter Wirkungsgrad',U0100:'Verbindung zum Motorsteuergerät verloren'};
+function obdLines(txt){return String(txt||'').split(/[\r\n]+/).map(l=>l.trim().replace(/^[0-9A-Fa-f]:\s*/,'')).filter(l=>l&&/^[0-9A-Fa-f ]+$/.test(l))}
+function obdBytes(txt,pid){const want=pid.slice(0,2).replace(/^0/,'4')+' '+pid.slice(2),want2='4'+pid.slice(1,2)+' '+pid.slice(2);for(const l of obdLines(txt)){const u=l.toUpperCase().replace(/\s+/g,' '),i=u.indexOf(want2);if(i>=0)return u.slice(i+want2.length).trim().split(' ').filter(Boolean).map(h=>parseInt(h,16))}return null}
+function dtcDecode(a,b){return 'PCBU'[a>>6]+((a>>4)&3)+(a&15).toString(16).toUpperCase()+(b>>4).toString(16).toUpperCase()+(b&15).toString(16).toUpperCase()}
+function parseDtc(txt,mode,can){
+ const m=parseInt(mode,16),codes=[],ls=String(txt||'').split(/[\r\n]+/).map(l=>l.trim()).filter(Boolean);
+ const multi=ls.some(l=>/^[0-9A-Fa-f]:/.test(l));
+ const seqs=multi?[ls.filter(l=>/^[0-9A-Fa-f]:/.test(l)).map(l=>l.replace(/^[0-9A-Fa-f]:\s*/,'')).join(' ')]:ls.filter(l=>/^[0-9A-Fa-f ]+$/.test(l));
+ seqs.forEach(l=>{const a=l.trim().split(/\s+/).map(h=>parseInt(h,16)),i=a.indexOf(m);if(i<0)return;let r=a.slice(i+1);if(can)r=r.slice(1);
+  for(let k=0;k+1<r.length;k+=2){if(r[k]===0&&r[k+1]===0)continue;codes.push(dtcDecode(r[k],r[k+1]))}});
+ return [...new Set(codes)];
+}
+async function obdPoll(){
+ if(!OBD.on)return;
+ try{
+  for(const [cmd,key,fn] of PIDS){
+   if(!OBD.on)return;
+   if((OBD.fails[key]||0)>=3)continue;
+   const r=await Obd.send({cmd,timeout:1500}),b=obdBytes(r.data,cmd);
+   if(b&&b.length){OBD.vals[key]=fn(b);OBD.fails[key]=0}else OBD.fails[key]=(OBD.fails[key]||0)+1;
+   renderObd();
+  }
+  OBD.err='';
+ }catch(e){OBD.err=String(e&&e.message||e);obdDrop();return}
+ OBD.timer=setTimeout(obdPoll,250);
+}
+function obdDrop(){OBD.on=false;clearTimeout(OBD.timer);try{if(Obd)Obd.disconnect().catch(()=>{})}catch(_){}renderObd()}
+async function obdConnect(){
+ if(!Obd){toast('OBD2 gibt es nur in der APK');return}
+ if(OBD.on)return;
+ try{
+  OBD.err='verbinde…';renderObd();
+  if(S.global.obdType==='wifi')await Obd.connect({type:'wifi',host:S.global.obdHost,port:+S.global.obdPort||35000});
+  else{if(!S.global.obdAddr)throw new Error('Bitte unter Einstellungen einen Adapter wählen');await Obd.connect({type:'bt',address:S.global.obdAddr})}
+  for(const c of ['ATZ','ATE0','ATL0','ATS0','ATH0','ATSP0'])await Obd.send({cmd:c,timeout:c==='ATZ'?3000:1500});
+  await Obd.send({cmd:'0100',timeout:8000}).catch(()=>{});
+  const pr=await Obd.send({cmd:'ATDPN',timeout:1500}).catch(()=>({data:'A6'}));OBD.can=/[6-9]/.test(String(pr.data||'').replace(/^A/i,'').trim().charAt(0));
+  OBD.on=true;OBD.fails={};OBD.vals={};OBD.err='';obdPoll();toast('OBD2 verbunden');
+ }catch(e){OBD.err=String(e&&e.message||e).slice(0,120);obdDrop()}
+ renderObd();
+}
+async function obdReadDtc(){
+ if(!OBD.on)throw new Error('OBD2 nicht verbunden');
+ const r=await Obd.send({cmd:'03',timeout:6000});
+ OBD.dtc=/NO DATA/i.test(r.data)?[]:parseDtc(r.data,'43',OBD.can);
+ const p=await Obd.send({cmd:'07',timeout:6000}).catch(()=>null);
+ OBD.pend=p&&!/NO DATA/i.test(p.data)?parseDtc(p.data,'47',OBD.can):[];
+ OBD.dtcT=Date.now();renderObd();return OBD.dtc;
+}
+async function obdClearDtc(){
+ if(!OBD.on)throw new Error('OBD2 nicht verbunden');
+ const r=await Obd.send({cmd:'04',timeout:6000});
+ const ok=/(^|\s)44(\s|$)/.test(obdLines(r.data).join(' ')+' ');
+ OBD.dtc=null;OBD.pend=null;renderObd();return ok;
+}
+function dtcName(c){return DTCTXT[c]||'Beschreibung unbekannt'}
+function dtcSpeak(c){return c.split('').join(' ')+', '+dtcName(c)}
+function openWeb(u){if(AppCtl)AppCtl.openUrl({url:u}).catch(()=>{});else window.open(u,'_blank')}
+function renderObd(){
+ const el=$('#b-obd');if(!el)return;
+ if(!el._sk){el._sk=1;el.innerHTML='<div id="obdlive" style="width:100%"></div><div id="obdctl" style="width:100%"></div>'}
+ const live=$('#obdlive'),ctl=$('#obdctl');
+ if(!S.global.obdOn){live.innerHTML='<div class="small">OBD2 ist aus. In den Einstellungen unter „Fahrzeug &amp; Apps“ einschalten.</div>';setHtml(ctl,'');return}
+ const v=OBD.vals,f=(k,d=0,u='')=>v[k]==null?'–':(+v[k]).toFixed(d)+u;
+ const R='#ff5a4a',G='#3dd68c',B='#3aa0ff';
+ const T=(l,val,c)=>`<div class="tile" style="border-left:3px solid ${c}"><div class="small" style="color:${c}">${l}</div><div style="font-size:calc(var(--s,1)*20px);font-weight:700;color:${c}">${val}</div></div>`;
+ live.innerHTML=OBD.on?`<div class="allgrid">${T('Drehzahl',f('rpm',0),R)}${T('Tempo OBD',f('spd',0,' km/h'),R)}${T('Kühlmittel',f('cool',0,' °C'),v.cool>105?R:G)}${T('Öl',f('oil',0,' °C'),G)}${T('Ansaugluft',f('iat',0,' °C'),G)}${T('Gaspedal',f('thr',0,' %'),B)}${T('Last',f('load',0,' %'),B)}${T('Tank',f('fuel',0,' %'),B)}${T('Spannung',f('volt',1,' V'),v.volt<11.8?R:G)}${T('Verbrauch',f('rate',1,' l/h'),B)}</div>`:'';
+ const codes=OBD.dtc,pend=OBD.pend;
+ let dt='';
+ if(codes){dt=codes.length?codes.map(c=>`<div class="small" style="text-align:left"><b>${c}</b> ${esc(dtcName(c))} <button class="rf" data-dtcweb="${c}">online</button></div>`).join(''):'<div class="small" style="color:#3dd68c">Keine Fehler gespeichert</div>';
+  if(pend&&pend.length)dt+='<div class="small">Anstehend: '+pend.join(', ')+'</div>'}
+ setHtml(ctl,`${OBD.err?`<div class="small" style="color:var(--warn)">${esc(OBD.err)}</div>`:''}${dt}<div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center;margin-top:4px"><button data-obd="conn">${OBD.on?'Trennen':'Verbinden'}</button>${OBD.on?'<button data-obd="dtc">Fehler lesen</button><button data-obd="clr">Fehler löschen</button>':''}</div>`);
+}
+$('#b-obd').addEventListener('click',e=>{
+ const d=e.target.dataset||{};
+ if(d.dtcweb){openWeb('https://www.google.com/search?q='+encodeURIComponent('OBD '+d.dtcweb+' Fehlercode Bedeutung'));return}
+ if(d.obd==='conn'){OBD.on?obdDrop():obdConnect()}
+ if(d.obd==='dtc')obdReadDtc().catch(er=>{OBD.err=String(er&&er.message||er);renderObd()});
+ if(d.obd==='clr'&&confirm('Fehlercodes wirklich löschen? Das setzt auch Bereitschaftstests zurück. Zündung muss an sein.'))obdClearDtc().then(ok=>toast(ok?'Fehlerspeicher gelöscht':'Steuergerät hat nicht bestätigt')).catch(er=>{OBD.err=String(er&&er.message||er);renderObd()});
+});
 const DIRN=['Norden','Nordosten','Osten','Südosten','Süden','Südwesten','Westen','Nordwesten'];
 // ===== Super-Pursuit-Sound: selbst erzeugt (WebAudio), läuft EINMAL nach dem gesprochenen Satz =====
 // Liegt eine Datei www/pursuit.mp3 in der App, wird stattdessen diese abgespielt.
@@ -515,6 +602,36 @@ function boostFx(){
 function kittAnswer(t){
  const A=S.global.anrede||'Michael',v=Math.round(speedKmh),has=re=>re.test(t),acc=accel||0;
  const nhn=(alt!=null&&lat!=null)?alt-geoid(lat,lon):null;
+ const c=t.replace(WAKE,' ').replace(/[^a-zäöüß0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+ if(S.global.obdOn){
+  if(Date.now()<OBD.confirmUntil&&/ja.*lösch|lösch.*ja|bestätig/.test(c)){OBD.confirmUntil=0;return obdClearDtc().then(ok=>ok?`Fehlerspeicher gelöscht, ${A}.`:'Das Steuergerät hat nicht bestätigt.')}
+  if(/obd/.test(c)&&/verbind|start/.test(c)){obdConnect();return 'Ich verbinde mich mit dem Fahrzeug.'}
+  if(/obd/.test(c)&&/trenn|aus/.test(c)){obdDrop();return 'OBD getrennt.'}
+  if(/fehler|störung|diagnose|motorkontrolle/.test(c)){
+   if(!OBD.on)return 'Das Fahrzeug ist nicht per OBD verbunden.';
+   if(/lösch|zurücksetz/.test(c)){OBD.confirmUntil=Date.now()+20000;return 'Soll ich den Fehlerspeicher wirklich löschen? Sage: ja, löschen.'}
+   return obdReadDtc().then(l=>l.length?`Es gibt ${l.length} Fehler: ${l.slice(0,4).map(dtcSpeak).join('. ')}.`:'Keine Fehler gespeichert.')
+  }
+  const ov=(k,txt,u,d=0)=>OBD.on?(OBD.vals[k]==null?'Dazu habe ich noch keinen Wert vom Steuergerät.':`${txt} ${de(OBD.vals[k],d)} ${u}.`):'Das Fahrzeug ist nicht per OBD verbunden.';
+  if(/drehzahl|touren/.test(c))return ov('rpm','Die Drehzahl beträgt','Umdrehungen pro Minute');
+  if(/kühlmittel|motortemperatur/.test(c))return ov('cool','Die Kühlmitteltemperatur beträgt','Grad');
+  if(/öltemperatur|öl temperatur/.test(c))return ov('oil','Die Öltemperatur beträgt','Grad');
+  if(/batterie|bordspannung|spannung/.test(c))return ov('volt','Die Bordspannung beträgt','Volt',1);
+  if(/motorlast|auslastung/.test(c))return ov('load','Die Motorlast beträgt','Prozent');
+ }
+ if(S.global.appCtl&&AppCtl){
+  let m=c.match(/^(?:öffne|öffnen|starte|starten|mach auf|zeig mir|zeige|rufe auf)\s+(?:die |den |das |mal |bitte )*(?:app )?(.+)$/);
+  if(m&&!/tour|pursuit|scanner/.test(m[1])){const nm=m[1].replace(/ app$/,'');return AppCtl.launch({name:nm}).then(r=>`Ich öffne ${r.label}.`).catch(()=>`Ich finde keine App namens ${nm}.`)}
+  m=c.match(/(?:navigiere|navigation|bring mich|route|fahr)\s+(?:mich\s+)?(?:nach|zu|zum|zur)\s+(.+)$/);
+  if(m){return AppCtl.navigate({query:m[1]}).then(()=>`Navigation nach ${m[1]} gestartet.`).catch(()=>'Ich finde keine Navigations-App.')}
+  if(/startbildschirm|home screen|schließe die app|beende die app|app schließen|app beenden|zurück zum home/.test(c)){AppCtl.home().catch(()=>{});return 'Ich gehe zum Startbildschirm. Andere Apps kann ich nicht beenden, das erlaubt Android nicht.'}
+  if(/dashboard|zurück zu kitt|zurück zur app/.test(c)){AppCtl.front().catch(()=>{});return `Zurück zum Dashboard, ${A}.`}
+  if(/musik|lied|titel|song/.test(c)){
+   const k=/pause|stopp|stop|anhalten/.test(c)?'pause':/nächst|überspring|vor/.test(c)?'next':/vorher|zurück/.test(c)?'prev':/abspiel|weiter|fortsetz|start|spiel/.test(c)?'play':'toggle';
+   AppCtl.media({key:k}).catch(()=>{});return k==='pause'?'Musik pausiert.':k==='next'?'Nächster Titel.':k==='prev'?'Vorheriger Titel.':'Musik läuft.'
+  }
+  if(/\blauter\b|\bleiser\b/.test(c)){AppCtl.volume({dir:/lauter/.test(c)?'up':'down'}).catch(()=>{});return /lauter/.test(c)?'Lauter.':'Leiser.'}
+ }
  if(has(/super|pursuit|persuit|persud|pörsuit|schub|turbo/)){boostFx();pursuitArm();return `Super Pursuit Mode aktiviert. Halten Sie sich mal fest, ${A}! Fünf. Vier. Drei. Zwei. Eins. Schub!`}
  if(has(/limit|erlaubt|darf ich|höchstgeschwindigkeit/))return limit!=null?`${A}, hier sind ${limit} Kilometer pro Stunde erlaubt${roadType?', '+roadType:''}.`:`${A}, ich kenne das Tempolimit hier noch nicht.`;
  if(has(/schnell|geschwindigkeit|tempo|pro stunde/)){
@@ -604,7 +721,7 @@ function renderAllValues(){
  </div>`;
  $('#b-all').innerHTML=big+`<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px">${fahrt}${nav}${wetter}${tank}</div>`;
 }
-function renderAll(){renderSpeed();renderLimit();renderAccel();renderTrip();renderDay();renderCompass();renderWeather();renderWarn();renderHeat();renderSat();renderFuel();renderTraffic();renderCustom();renderAllValues();renderRange();renderTour()}
+function renderAll(){renderObd();renderSpeed();renderLimit();renderAccel();renderTrip();renderDay();renderCompass();renderWeather();renderWarn();renderHeat();renderSat();renderFuel();renderTraffic();renderCustom();renderAllValues();renderRange();renderTour()}
 $('#b-tour').addEventListener('click',e=>{const a=e.target.dataset&&e.target.dataset.tour;if(!a)return;
  if(a==='share'){const txt=tourText();if(navigator.share){navigator.share({title:'Tour-Protokoll',text:txt}).catch(()=>{})}else if(navigator.clipboard){navigator.clipboard.writeText(txt).then(()=>toast('Protokoll kopiert'),()=>{})}return}
  if(a==='log'){S.tourLogOpen=!S.tourLogOpen}
@@ -812,6 +929,8 @@ function buildPanel(){
  <p>Tacho-Stil: Unter „Allgemein“ wählst du Digital, Analog, Rund, Sport, Racer, Robust, Neutral oder Verspielt. Die Querformat-Stile füllen die ganze Breite.</p>
  <p>KITT: Mikrofon antippen und sprechen, z. B. „Wie schnell fahre ich?“, „Wetter“, „Tankstelle“, „Stau“, „Höhe“, „Witz“ oder „Super Pursuit Mode“.</p>
  <p>Aktivierungswort: Unter „Betriebsart“ auf „Immer bereit“ stellen, dann reagiert die App nur auf „KITT“.</p>
+ <p>Apps: Sage „KITT, öffne Spotify“, „Musik pause“, „nächster Titel“, „lauter“, „navigiere nach …“ oder „Startbildschirm“. Fremde Apps schließen und darin tippen erlaubt Android nicht.</p>
+ <p>OBD2: ELM327-Adapter in Android koppeln, unter „Fahrzeug &amp; Apps“ wählen und verbinden. Dann „KITT, Fehler auslesen“, „Drehzahl“ oder „Kühlmitteltemperatur“. Löschen verlangt eine Bestätigung.</p>
  <p>Trip: Der Knopf unter der Trip-Anzeige setzt die Tagesstrecke auf null. Tankstellen und Stau kannst du mit „Aktualisieren“ sofort neu abrufen.</p>
  </details><h3>Anzeigen</h3>`;
  WIDGETS.forEach(w=>{const c=S.widgets[w.id];h+=`<div class="row"><label><input type="checkbox" data-w="${w.id}" data-k="on" ${c.on?'checked':''}> ${w.name}</label><input type="color" data-w="${w.id}" data-k="color" value="${c.color}"><input type="range" min="0.6" max="1.8" step="0.05" value="${c.scale}" data-w="${w.id}" data-k="scale" style="width:90px"></div>`});
@@ -832,6 +951,15 @@ function buildPanel(){
  <div class="row"><label>Bildschirm anlassen</label><input type="checkbox" data-g="awake" ${S.global.awake?'checked':''}></div>
  <div class="row"><label>Drehung sperren</label><select data-g="orient"><option value="off" ${S.global.orient==='off'?'selected':''}>aus</option><option value="portrait" ${S.global.orient==='portrait'?'selected':''}>Hochformat</option><option value="landscape" ${S.global.orient==='landscape'?'selected':''}>Querformat</option></select></div>
  <div class="row"><label>Toleranz km/h</label><input type="number" min="0" max="30" data-g="tol" value="${S.global.tol}" style="width:70px"></div>
+ <h3>Fahrzeug &amp; Apps</h3>
+ <div class="row"><label>Apps per Sprache öffnen und steuern</label><input type="checkbox" data-g="appCtl" ${S.global.appCtl?'checked':''}></div>
+ <div class="row"><label>Bluetooth-Headset als Mikrofon</label><input type="checkbox" data-g="btMic" ${S.global.btMic?'checked':''}></div>
+ <div class="row"><label>Im Hintergrund weiter zuhören</label><input type="checkbox" data-g="keepAlive" ${S.global.keepAlive?'checked':''}></div>
+ <div class="row"><label>OBD2 verwenden</label><input type="checkbox" data-g="obdOn" ${S.global.obdOn?'checked':''}></div>
+ <div class="row"><label>OBD2-Anschluss</label><select data-g="obdType"><option value="bt" ${S.global.obdType==='bt'?'selected':''}>Bluetooth (ELM327)</option><option value="wifi" ${S.global.obdType==='wifi'?'selected':''}>WLAN (ELM327)</option></select></div>
+ <div class="row"><label>Bluetooth-Adapter</label><select data-g="obdAddr" style="max-width:190px">${(S.global.obdAddr&&!OBDDEV.some(d=>d.address===S.global.obdAddr)?[{name:S.global.obdAddr,address:S.global.obdAddr}]:[]).concat(OBDDEV).map(d=>`<option value="${esc(d.address)}" ${S.global.obdAddr===d.address?'selected':''}>${esc(d.name||d.address)}</option>`).join('')||'<option value="">–</option>'}</select><button id="obdscan">Suchen</button></div>
+ <div class="row"><label>WLAN-Adresse und Port</label><input type="text" data-g="obdHost" value="${esc(S.global.obdHost)}" style="width:110px"><input type="number" data-g="obdPort" value="${S.global.obdPort}" style="width:70px"></div>
+ <div class="row"><button id="obdconn">OBD2 verbinden</button></div>
  <h3>Tank &amp; Reichweite</h3>
  <div class="row"><label>Tankinhalt (l)</label><input type="number" min="0" max="120" step="0.5" data-g="tankMax" value="${S.global.tankMax??''}" style="width:90px"></div>
  <div class="row"><label>Verbrauch (l/100 km)</label><input type="number" min="0" max="60" step="0.1" data-g="verbrauch" value="${S.global.verbrauch??''}" style="width:90px"></div>
@@ -867,6 +995,9 @@ $('#panel').addEventListener('input',e=>{const t=e.target;
  if(t.dataset.w){const c=S.widgets[t.dataset.w],k=t.dataset.k;c[k]=t.type==='checkbox'?t.checked:(k==='scale'?+t.value:t.value)}
  if(t.dataset.g){const k=t.dataset.g;S.global[k]=t.type==='checkbox'?t.checked:(t.type==='number'||t.type==='range'?+t.value:t.value)}
  if(t.dataset.g==='tankL'){S.global.tankRef=S.trip.total}
+ if(t.dataset.g==='btMic'&&AppCtl)AppCtl.bt({on:t.checked}).then(r=>{if(t.checked)toast(r&&r.available?'Bluetooth-Mikrofon aktiv':'Kein Bluetooth-Headset verbunden')}).catch(e=>toast('Bluetooth: '+(e&&e.message||e),6000));
+ if(t.dataset.g==='keepAlive'&&AppCtl&&voiceOn)AppCtl.keepAlive({on:t.checked}).catch(()=>{});
+ if(t.dataset.g==='obdOn'&&!t.checked)obdDrop();
  if(t.id==='vmic'){if(t.checked&&S.global.vmode!=='wake'){S.global.vmode='wake';save();buildPanel()}setVoice(t.checked);return}
  if(t.dataset.g==='vmode'){S.global.vmode=t.value;save();if(t.value==='push'&&voiceOn)setVoice(false);buildPanel();return}
  if(t.dataset.g==='vvol'){const o=$('#vvolv');if(o)o.textContent=t.value}
@@ -879,6 +1010,8 @@ $('#panel').addEventListener('click',async e=>{const id=e.target.id;
  if(id==='close')$('#menu').classList.remove('open');
  if(id==='addrep'){const v=$('#rep').value.trim();if(v){S.reports.unshift({t:Date.now(),txt:v});S.reports=S.reports.slice(0,20);save();$('#rep').value='';renderAll()}}
  if(id==='rtrip'){S.trip.trip=0;save();renderAll()}
+ if(id==='obdscan'){if(!Obd){toast('Nur in der APK');return}Obd.devices().then(r=>{OBDDEV=r.devices||[];const g=OBDDEV.find(d=>/obd|elm|vlink|veepeak|vgate|konnwei/i.test(d.name||''));if(g&&!S.global.obdAddr){S.global.obdAddr=g.address;save()}buildPanel();toast(OBDDEV.length?OBDDEV.length+' gekoppelte Geräte':'Keine gekoppelten Geräte. Adapter zuerst in den Android-Bluetooth-Einstellungen koppeln.',6000)}).catch(e=>toast('Bluetooth: '+(e&&e.message||e),6000))}
+ if(id==='obdconn'){S.global.obdOn=true;save();$('#menu').classList.remove('open');obdConnect()}
  if(id==='vpurs'){unlockAudio();playPursuit()}
  if(id==='vcheck'){
   const el=$('#vstat');
@@ -927,7 +1060,8 @@ fuelList=S.cache.fuel||[];ab=S.cache.ab||[];
 ['#b-fuel','#b-traffic'].forEach(id=>$(id).addEventListener('click',e=>{const k=e.target.dataset&&e.target.dataset.rf;if(k)refreshNow(k)}));
 if(Voice){Voice.addListener('speech',d=>heard(d.text,d.alts));Voice.addListener('wake',()=>{toast('Ja, ich höre …',2500)});Voice.addListener('spoke',d=>{lastSpoke=Date.now();voiceLast='spricht ('+(d.via||'?')+')';const el=$('#vstat');if(el)el.textContent='Status: '+voiceLast});Voice.addListener('state',d=>{voiceState=d;if(pursuitPending){if(d.speaking)pursuitSaw=true;else if(pursuitSaw)pursuitDone()}voiceLast=d.error||d.info||(d.speaking?'spricht':d.recording?'hört auf Befehl':d.listening?'wartet auf „KITT“':'bereit');if(d.error)toast('Mikrofon: '+d.error,5000);else if(d.info)toast(d.info,3000);paintMic();const el=$('#vstat');if(el)el.textContent='Status: '+voiceLast});Voice.voices().then(r=>{voiceList=r.voices||[]}).catch(()=>{})}
 $('#mic').onclick=()=>{if(S.global.vmode==='push')talkOnce();else setVoice(!voiceOn)};
-document.addEventListener('visibilitychange',()=>{if(!voiceOn||!Voice)return;if(document.visibilityState==='hidden')Voice.stopListening().catch(()=>{});else Voice.listen().catch(()=>{})});
+document.addEventListener('visibilitychange',()=>{if(!voiceOn||!Voice||S.global.keepAlive)return;if(document.visibilityState==='hidden')Voice.stopListening().catch(()=>{});else Voice.listen().catch(()=>{})});
+if(S.global.btMic&&AppCtl)AppCtl.bt({on:true}).catch(()=>{});
 if(S.global.voice&&S.global.vmode==='wake')setVoice(true);else if(S.global.voice){S.global.voice=false;save()}
 applyCfg();renderAll();wake();applyOrient();startSat();
 setInterval(renderCustom,1000);
