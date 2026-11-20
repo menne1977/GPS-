@@ -122,7 +122,8 @@ public class ObdPlugin extends Plugin {
 
     @PluginMethod
     public void send(PluginCall call) {
-        final String cmd = call.getString("cmd", "");
+        final String cmd = call.getString("cmd", "").trim().toUpperCase().replace(" ", "");
+        if (!allowed(cmd)) { call.reject("Befehl gesperrt: " + cmd + " (nur Echtzeitwerte, Fehler lesen und löschen erlaubt)"); return; }
         final int timeout = call.getInt("timeout", 3000);
         ex.execute(() -> {
             try {
@@ -149,6 +150,20 @@ public class ObdPlugin extends Plugin {
                 call.reject(e.getMessage() == null ? "Sendefehler" : e.getMessage());
             }
         });
+    }
+
+    /**
+     * Freigabeliste: nur Lesen und Fehlerspeicher löschen.
+     * AT...  = nur Einstellungen des Adapters (ändern nichts am Auto)
+     * 01xx   = Echtzeitwerte lesen
+     * 03, 07 = gespeicherte und anstehende Fehler lesen
+     * 04     = Fehlerspeicher löschen
+     * Alles andere (Codieren, Anpassen, Stellglieder, Programmieren) ist gesperrt.
+     */
+    private static boolean allowed(String c) {
+        if (c.matches("ATZ|ATE0|ATL0|ATS[01]|ATH0|ATSP0|ATDPN|ATRV")) return true;
+        if (c.matches("01[0-9A-F]{2}")) return true;
+        return c.equals("03") || c.equals("07") || c.equals("04");
     }
 
     @PluginMethod
