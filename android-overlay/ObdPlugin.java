@@ -101,7 +101,6 @@ public class ObdPlugin extends Plugin {
                     BluetoothAdapter ad = BluetoothAdapter.getDefaultAdapter();
                     if (ad == null || !ad.isEnabled()) throw new Exception("Bluetooth ist aus");
                     BluetoothDevice d = ad.getRemoteDevice(addr);
-                    ad.cancelDiscovery();
                     try {
                         bt = d.createRfcommSocketToServiceRecord(SPP);
                         bt.connect();

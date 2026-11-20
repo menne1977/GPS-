@@ -719,7 +719,7 @@ function renderAllValues(){
   <div style="background:#0b1118;border:1px solid #1d2733;border-radius:12px;padding:8px;text-align:center"><div style="font-size:11px;letter-spacing:2px;color:${B}">ERLAUBT</div><div style="font-size:48px;font-weight:800;color:${B};line-height:1.1">${limit??dash}</div><div style="font-size:11px;color:#9fb0c3">${esc(roadType||'')}</div></div>
   <div style="background:#0b1118;border:1px solid #1d2733;border-radius:12px;padding:8px;text-align:center"><div style="font-size:11px;letter-spacing:2px;color:${rg&&rg.km<50?R:G}">REICHWEITE</div><div style="font-size:48px;font-weight:800;color:${rg&&rg.km<50?R:G};line-height:1.1">${rg?Math.round(rg.km):dash}</div><div style="font-size:11px;color:#9fb0c3">${rg?'km bis leer':'Tankdaten fehlen'}</div></div>
  </div>`;
- $('#b-all').innerHTML=big+`<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px">${fahrt}${nav}${wetter}${tank}</div>`;
+ $('#b-all').innerHTML=big+`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px">${fahrt}${nav}${wetter}${tank}</div>`;
 }
 function renderAll(){renderObd();renderSpeed();renderLimit();renderAccel();renderTrip();renderDay();renderCompass();renderWeather();renderWarn();renderHeat();renderSat();renderFuel();renderTraffic();renderCustom();renderAllValues();renderRange();renderTour()}
 $('#b-tour').addEventListener('click',e=>{const a=e.target.dataset&&e.target.dataset.tour;if(!a)return;
