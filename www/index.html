@@ -124,6 +124,7 @@ WIDGETS.forEach(w=>{const d=document.createElement('div');d.className='w';d.id='
 function applyCfg(){
  WIDGETS.forEach(w=>{const c=S.widgets[w.id],el=$('#w-'+w.id);el.style.display=c.on?'':'none';el.style.color=c.color;el.style.flexBasis=(w.base*c.scale)+'px';el.style.setProperty('--s',c.scale)});
  const sp=$('#w-speed');if(LAND.includes(S.global.style)){sp.style.flexBasis='100%';sp.style.minWidth='100%'}else sp.style.minWidth='';
+ $('#w-all').style.flexBasis='100%';$('#w-all').style.minWidth='100%';
 }
 const LAND=['cockpit','rund','sport','racer','robust','neutral','spiel'];
 let wl=null;
@@ -581,17 +582,27 @@ function renderRange(){
 $('#b-range').addEventListener('click',e=>{if(e.target.dataset&&e.target.dataset.tank==='full'){S.global.tankL=S.global.tankMax||0;S.global.tankRef=S.trip.total;S.global.rangeWarned=false;save();renderAll()}});
 function renderAllValues(){
  const v=speedKmh,nhn=(alt!=null&&lat!=null)?alt-geoid(lat,lon):null,used=sats?sats.sats.filter(x=>x.used).length:null;
- const L=fuelSorted(),sec=(s)=>s==null?'–':s;
- const R='#ff5a4a',G='#3dd68c',B='#3aa0ff',rg=rangeInfo();
- const tiles=[
-  ['Tempo',Math.round(v),'km/h',R],['Erlaubt',limit??'–','km/h',B],['Beschleunigung',accel==null?'–':de(accel),'m/s²',R],['0–100',zeroRes?de(zeroRes):'–','s',R],
-  ['Bremsen',accel!=null&&accel<-0.5?de(-accel):'0','m/s²',R],['Heute max',Math.round(S.day.max),'km/h',R],['Heute km',de(S.day.dist),'km',B],['Trip',de(S.trip.trip),'km',B],['Gesamt',Math.round(S.trip.total),'km',B],
-  ['Höhe NN',nhn==null?'–':Math.round(nhn),'m',B],['Kurs',cmpCur==null?'–':Math.round(cmpCur),'Grad',B],['GPS Genauigkeit',gpsAcc==null?'–':Math.round(gpsAcc),'m',B],['Satelliten',used==null?'–':used+' / '+sats.visible,'',B],
-  ['Temperatur',wx?Math.round(wx.cur.temperature_2m):'–','°C',G],['Böen',wx?Math.round(wx.cur.wind_gusts_10m):'–','km/h',G],['Regen',wx?wx.pp[0]:'–','%',G],
-  ['DWD-Warnungen',(warn||[]).length,'',R],['Hitze',(heat||[]).length,'',R],['Reichweite',rg?Math.round(rg.km):'–','km',rg&&rg.km<50?R:G],['Tankstellen',L.length,L.length?'nächste '+de(L[0].d)+' km':'',B],['Autobahn-Meldungen',ab.length,'',B],
-  ['Tour km',de(S.tour.dist),'km',G]
- ];
- $('#b-all').innerHTML=`<div class="allgrid">`+tiles.map(([a,b,c,col])=>`<div class="tile" style="border-left:3px solid ${col}"><div class="small" style="color:${col}">${a}</div><div style="font-size:calc(var(--s,1)*22px);font-weight:700;color:${col}">${b}</div><div class="small">${c}</div></div>`).join('')+`</div>`;
+ const F=fuelSorted(),rg=rangeInfo(),R='#ff5a4a',G='#3dd68c',B='#3aa0ff',dash='–';
+ const row=(l,val,col)=>`<div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px;padding:3px 0;border-bottom:1px solid #1d2733"><span style="font-size:13px;color:#9fb0c3">${l}</span><span style="font-size:17px;font-weight:700;color:${col}">${val}</span></div>`;
+ const card=(title,col,rows)=>`<div style="background:#0b1118;border:1px solid #1d2733;border-top:3px solid ${col};border-radius:10px;padding:6px 8px;min-width:0"><div style="font-size:11px;letter-spacing:2px;color:${col};margin-bottom:2px">${title}</div>${rows}</div>`;
+ const fahrt=card('FAHRT',R,
+   row('Beschleunigung',accel==null?dash:de(accel)+' m/s²',R)+row('0–100',zeroRes?de(zeroRes)+' s':dash,R)+
+   row('Bremsen',accel!=null&&accel<-0.5?de(-accel)+' m/s²':'0',R)+row('Heute max',Math.round(S.day.max)+' km/h',R)+row('Heute',de(S.day.dist)+' km',R));
+ const nav=card('NAVIGATION',B,
+   row('Höhe NN',nhn==null?dash:Math.round(nhn)+' m',B)+row('Kurs',cmpCur==null?dash:Math.round(cmpCur)+'°',B)+
+   row('GPS ±',gpsAcc==null?dash:Math.round(gpsAcc)+' m',B)+row('Satelliten',used==null?dash:used+'/'+sats.visible,B)+row('Trip',de(S.trip.trip)+' km',B)+row('Gesamt',Math.round(S.trip.total)+' km',B));
+ const wetter=card('WETTER & WARNUNG',G,
+   row('Temperatur',wx?Math.round(wx.cur.temperature_2m)+' °C':dash,G)+row('Böen',wx?Math.round(wx.cur.wind_gusts_10m)+' km/h':dash,G)+
+   row('Regen',wx?wx.pp[0]+' %':dash,G)+row('DWD-Warnung',(warn||[]).length?(warn.length)+' aktiv':'keine',(warn||[]).length?R:G)+row('Hitze',(heat||[]).length?'aktiv':'keine',(heat||[]).length?R:G));
+ const tank=card('TANK & TOUR',B,
+   row('Tankstelle',F.length?de(F[0].d)+' km':'keine',B)+row('Tankstellen 5 km',F.length,B)+row('Autobahn',ab.length?ab.length+' Meldungen':'frei',ab.length?R:B)+
+   row('Tour',de(S.tour.dist)+' km',G)+row('Tour-Zeit',S.tour.on?Math.round((Date.now()-S.tour.start)/60000)+' min':dash,G));
+ const big=`<div style="display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:8px;margin-bottom:8px">
+  <div style="background:#0b1118;border:1px solid #1d2733;border-radius:12px;padding:8px;text-align:center"><div style="font-size:72px;font-weight:800;color:${R};line-height:1">${Math.round(v)}</div><div style="font-size:12px;letter-spacing:3px;color:${R}">KM/H</div></div>
+  <div style="background:#0b1118;border:1px solid #1d2733;border-radius:12px;padding:8px;text-align:center"><div style="font-size:11px;letter-spacing:2px;color:${B}">ERLAUBT</div><div style="font-size:48px;font-weight:800;color:${B};line-height:1.1">${limit??dash}</div><div style="font-size:11px;color:#9fb0c3">${esc(roadType||'')}</div></div>
+  <div style="background:#0b1118;border:1px solid #1d2733;border-radius:12px;padding:8px;text-align:center"><div style="font-size:11px;letter-spacing:2px;color:${rg&&rg.km<50?R:G}">REICHWEITE</div><div style="font-size:48px;font-weight:800;color:${rg&&rg.km<50?R:G};line-height:1.1">${rg?Math.round(rg.km):dash}</div><div style="font-size:11px;color:#9fb0c3">${rg?'km bis leer':'Tankdaten fehlen'}</div></div>
+ </div>`;
+ $('#b-all').innerHTML=big+`<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px">${fahrt}${nav}${wetter}${tank}</div>`;
 }
 function renderAll(){renderSpeed();renderLimit();renderAccel();renderTrip();renderDay();renderCompass();renderWeather();renderWarn();renderHeat();renderSat();renderFuel();renderTraffic();renderCustom();renderAllValues();renderRange();renderTour()}
 $('#b-tour').addEventListener('click',e=>{const a=e.target.dataset&&e.target.dataset.tour;if(!a)return;
