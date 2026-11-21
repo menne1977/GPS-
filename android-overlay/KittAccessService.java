@@ -96,6 +96,7 @@ public class KittAccessService extends AccessibilityService {
             case "home": return performGlobalAction(GLOBAL_ACTION_HOME);
             case "recents": return performGlobalAction(GLOBAL_ACTION_RECENTS);
             case "notifications": return performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS);
+            case "split": return performGlobalAction(GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN);
             default: return false;
         }
     }

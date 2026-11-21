@@ -96,7 +96,7 @@ public class AppCtlPlugin extends Plugin {
         String t = call.getString("text", "");
         boolean ok;
         switch (a) {
-            case "back": case "home": case "recents": case "notifications": ok = s.global(a); break;
+            case "back": case "home": case "recents": case "notifications": case "split": ok = s.global(a); break;
             case "click": ok = s.clickText(t, false); break;
             case "scroll_down": ok = s.scroll(true); break;
             case "scroll_up": ok = s.scroll(false); break;
@@ -120,6 +120,15 @@ public class AppCtlPlugin extends Plugin {
             default: call.reject("Unbekannte Aktion"); return;
         }
         if (ok) call.resolve(); else call.reject("nicht gefunden");
+    }
+
+    @PluginMethod
+    public void adjacent(PluginCall call) {
+        Intent li = getContext().getPackageManager().getLaunchIntentForPackage("com.google.android.apps.maps");
+        if (li == null) { call.reject("Keine Karten-App gefunden"); return; }
+        li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
+        getContext().startActivity(li);
+        call.resolve();
     }
 
     @PluginMethod

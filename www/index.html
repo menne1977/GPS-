@@ -68,10 +68,39 @@ button.rf{margin-top:6px;padding:6px 12px;font-size:13px}
 button{background:#22303f;color:var(--txt);border:0;border-radius:8px;padding:8px 10px;font-size:14px}
 input[type=color]{width:44px;height:28px;border:0;background:none}
 input,select,textarea{background:#0b0f14;color:#fff;border:0;border-radius:8px;padding:6px}
+#app{display:block;position:relative;padding:0;overflow:auto}
+.w{position:absolute;flex:none;min-width:0;min-height:0;overflow:hidden auto;padding:6px}
+.w.inst{padding:0;background:none;overflow:hidden}
+.w.inst .ib{position:absolute;inset:0}
+.ib{container-type:size;position:relative;background:#0b1118;border-radius:12px;overflow:hidden}
+.ie{box-sizing:border-box}
+.w.zoom{position:fixed!important;left:0!important;top:0!important;right:0!important;bottom:0!important;width:auto!important;height:auto!important;transform:none!important;z-index:60!important;border-radius:0}
+.ov{display:none;position:absolute;inset:0;z-index:5;border:2px dashed #3aa0ff;background:rgba(58,160,255,.10);touch-action:none}
+body.edit .ov{display:block}
+body.edit .w{overflow:hidden}
+.ov .hl{position:absolute;left:44px;right:80px;top:6px;font-size:12px;color:#fff;text-shadow:0 0 4px #000;pointer-events:none;overflow:hidden;white-space:nowrap}
+.hx,.he,.hrot{position:absolute;top:4px;width:32px;height:32px;border-radius:50%;color:#fff;font:bold 16px/32px sans-serif;text-align:center;touch-action:none}
+.hx{left:4px;background:#c0392b}.he{left:40px;top:40px;background:#2c7be5}.hrot{right:4px;background:#d68910}
+.hr{position:absolute;right:0;bottom:0;width:38px;height:38px;background:#3aa0ff;border-radius:10px 0 8px 0;touch-action:none}
+.rh{position:absolute;right:-6px;bottom:-6px;width:22px;height:22px;background:#ffb13b;border-radius:6px;touch-action:none}
+#edbar{display:none;position:fixed;left:6px;right:6px;bottom:8px;z-index:30;gap:6px;flex-wrap:wrap;justify-content:center;background:rgba(20,27,36,.95);border:1px solid #3aa0ff;border-radius:12px;padding:8px}
+#prof,#edt{position:fixed;top:6px;z-index:5;background:#22303f;color:var(--txt);border:0;border-radius:8px;padding:6px 10px;font-size:18px}
+#prof{right:98px}#edt{right:144px}
+#ied{position:fixed;inset:0;z-index:40;background:#0b0f14;display:flex;flex-direction:column}
+#ied .ibar{display:flex;gap:6px;padding:8px}
+#ied-stage{flex:1 1 auto;min-height:120px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#05080d}
+#ied-box{outline:1px solid #3a4a5c}
+#ied-pal{display:flex;gap:6px;flex-wrap:wrap;padding:6px 8px}
+#ied-props{max-height:38vh;overflow:auto;border-top:1px solid #223040;padding-bottom:10px}
+details.sub{border-bottom:1px solid #223040;padding:4px 0}
+details.sub>summary{cursor:pointer;color:var(--ok);font-size:15px;font-weight:700;padding:8px 0;list-style:none}
+details.sub>summary::before{content:'▸ '}
+details.sub[open]>summary::before{content:'▾ '}
 </style>
 </head>
 <body>
-<button id="open" aria-label="Menü">☰</button><button id="mic" aria-label="Mikrofon">🎤</button><div id="scan"></div><div id="toast"></div><div id="boost"></div>
+<button id="open" aria-label="Menü">☰</button><button id="prof" aria-label="Profil">🚗</button><button id="edt" aria-label="Layout bearbeiten">✎</button><button id="mic" aria-label="Mikrofon">🎤</button><div id="scan"></div><div id="toast"></div><div id="boost"></div>
+<div id="edbar"><button id="ed-done">Fertig</button><button id="ed-show">Fenster ein/aus</button><button id="ed-add">+ Instrument</button><button id="ed-reset">Layout zurücksetzen</button></div>
 <div id="app"></div>
 <div id="navsheet"><div id="navbox"></div></div>
 <div id="menu"><div id="panel"></div></div>
@@ -949,9 +978,11 @@ function buildPanel(){
  <p>Andere Apps bedienen: Schalter „Andere Apps bedienen und schließen“ einschalten, dann „Bedienungshilfe prüfen und öffnen“ und KITT in Android einschalten. Auf neueren Androiden vorher in den App-Infos „Eingeschränkte Einstellungen zulassen“ wählen. Befehle: „zurück“, „tippe auf …“, „scrolle nach unten“, „schreibe …“, „schließe Spotify“, „schließe die App“, „Benachrichtigungen“. Die Bedienungshilfe reagiert nur auf deine Sprachbefehle.</p>
  <p>Apps: Sage „KITT, öffne Spotify“, „Musik pause“, „nächster Titel“, „lauter“, „navigiere nach …“ oder „Startbildschirm“. Fremde Apps schließen und darin tippen erlaubt Android nicht.</p>
  <p>OBD2: ELM327-Adapter in Android koppeln, unter „Fahrzeug &amp; Apps“ wählen und verbinden. Dann „KITT, Fehler auslesen“, „Drehzahl“ oder „Kühlmitteltemperatur“. Löschen verlangt eine Bestätigung.</p>
+ <p>Layout: Oben ✎ oder Menü „Profil &amp; Layout“: Fenster mit dem Finger verschieben, unten rechts die Größe ändern, oben rechts drehen, ✕ blendet aus. Doppeltippen vergrößert ein Fenster auf den ganzen Bildschirm. 🚗/🏍 oben wechselt zwischen Profil 1 Auto und Profil 2 Motorrad, jedes mit eigenem Layout.</p>
+ <p>Instrumente: Menü „Instrumente“. Eigene Tachos aus Rechteck, Kreis, Quadrat, Text, Wert, Balken, Bogen und Liste bauen, jedes Element mit Farbe, Größe und Wert. Beim Wert stellst du Ziffern und Nachkommastellen ein, zum Beispiel 3 Ziffern und 2 Nachkommastellen. Doppeltippen kann auf Null setzen oder den Wert umschalten.</p>
  <p>Trip: Der Knopf unter der Trip-Anzeige setzt die Tagesstrecke auf null. Tankstellen und Stau kannst du mit „Aktualisieren“ sofort neu abrufen.</p>
- </details><h3>Anzeigen</h3>`;
- WIDGETS.forEach(w=>{const c=S.widgets[w.id];h+=`<div class="row"><label><input type="checkbox" data-w="${w.id}" data-k="on" ${c.on?'checked':''}> ${w.name}</label><input type="color" data-w="${w.id}" data-k="color" value="${c.color}"><input type="range" min="0.6" max="1.8" step="0.05" value="${c.scale}" data-w="${w.id}" data-k="scale" style="width:90px"></div>`});
+ </details>${window.DZ?DZ.menu():''}<h3>Anzeigen</h3>`;
+ if(window.DZ)h+=DZ.vis();else WIDGETS.forEach(w=>{const c=S.widgets[w.id];h+=`<div class="row"><label><input type="checkbox" data-w="${w.id}" data-k="on" ${c.on?'checked':''}> ${w.name}</label><input type="color" data-w="${w.id}" data-k="color" value="${c.color}"><input type="range" min="0.6" max="1.8" step="0.05" value="${c.scale}" data-w="${w.id}" data-k="scale" style="width:90px"></div>`});
  h+=`<h3>Heute</h3>
  <div class="small">Höchstwert: ${Math.round(S.day.max)} km/h · Ø bewegt: ${S.day.mt>0?Math.round(S.day.dist/(S.day.mt/3600000)):0} km/h · Strecke: ${S.day.dist.toFixed(1)} km</div>
  <h3>Datenquellen (Abruf nur im Intervall)</h3>
@@ -1006,7 +1037,7 @@ function buildPanel(){
  <div class="row"><button id="sens">Bewegungssensor aktivieren</button><button id="rtrip">Tagesstrecke 0</button></div>
  <div class="row"><button id="reset">Alles zurücksetzen</button></div>
  <p class="small">Blitzer-Warnungen sind nicht enthalten: Warnungen vor Geschwindigkeitsmessungen sind in Deutschland verboten.</p>`;
- $('#panel').innerHTML=h;
+ $('#panel').innerHTML=window.DZ?DZ.collapse(h):h;
 }
 buildPanel();
 $('#open').onclick=()=>{buildPanel();$('#menu').classList.add('open')};
@@ -1088,5 +1119,6 @@ applyCfg();renderAll();wake();applyOrient();startSat();
 setInterval(renderCustom,1000);
 setInterval(()=>{if(S.global.style==='cockpit')renderSpeed()},250);
 </script>
+<script src="designer.js"></script>
 </body>
 </html>
