@@ -54,6 +54,10 @@ const SRC={
  dir:{l:'Himmelsrichtung',str:true,g:()=>null,s:()=>{const h=(typeof cmpCur==='number')?cmpCur:null;return h==null?'–':['N','NO','O','SO','S','SW','W','NW'][Math.round(h/45)%8]}},
  road:{l:'Straßenart',str:true,g:()=>null,s:()=>roadType||'–'}
 };
+(()=>{const have=new Set(['rpm','cool','oil','iat','thr','load','volt','rate']);
+ PIDS.forEach(p=>{if(have.has(p[1])||p[1]==='fuel')return;const mn=p[1]==='stft1'||p[1]==='ltft1'||p[1]==='stft2'||p[1]==='ltft2'||p[1]==='egre'?-25:0;SRC['o_'+p[1]]={l:'OBD '+p[3],u:p[4],g:()=>ob(p[1]),dec:p[5],max:p[6],min:mn}});
+ OBDX.forEach(x=>{SRC['o_'+x[0]]={l:'OBD '+x[1],u:x[2],g:()=>ob(x[0]),dec:x[3],max:x[4]}});
+})();
 const SRCKEYS=Object.keys(SRC);
 const srcOpts=()=>SRCKEYS.map(k=>[k,SRC[k].l]);
 function fmt(v,e,k){

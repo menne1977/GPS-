@@ -488,7 +488,36 @@ function heard(text,alts){
 // ===== OBD2 (ELM327): Echtzeitwerte, Fehler lesen und löschen =====
 let OBDDEV=[];
 const OBD={can:true,on:false,vals:{},fails:{},dtc:null,pend:null,dtcT:0,err:'',timer:0,confirmUntil:0};
-const PIDS=[['010C','rpm',r=>(r[0]*256+r[1])/4],['010D','spd',r=>r[0]],['0105','cool',r=>r[0]-40],['015C','oil',r=>r[0]-40],['010F','iat',r=>r[0]-40],['0111','thr',r=>r[0]*100/255],['0104','load',r=>r[0]*100/255],['012F','fuel',r=>r[0]*100/255],['0142','volt',r=>(r[0]*256+r[1])/1000],['015E','rate',r=>(r[0]*256+r[1])/20]];
+const s16=(a,b)=>((a*256+b)<<16)>>16;
+const P=(id,key,label,unit,dec,max,fn,fast)=>['01'+id,key,fn,label,unit,dec,max,fast];
+const PIDS=[
+ P('0C','rpm','Drehzahl','U/min',0,8000,r=>(r[0]*256+r[1])/4,1),P('0D','spd','Tempo (OBD)','km/h',0,250,r=>r[0],1),
+ P('11','thr','Gaspedal Drossel','%',0,100,r=>r[0]*100/255,1),P('04','load','Motorlast','%',0,100,r=>r[0]*100/255,1),
+ P('0B','map','Ladedruck absolut','kPa',0,250,r=>r[0],1),P('10','maf','Luftmasse','g/s',1,300,r=>(r[0]*256+r[1])/100,1),
+ P('05','cool','Kühlmittel','°C',0,130,r=>r[0]-40),P('5C','oil','Öltemperatur','°C',0,150,r=>r[0]-40),P('0F','iat','Ansaugluft','°C',0,80,r=>r[0]-40),
+ P('46','amb','Außentemperatur (Motor)','°C',0,50,r=>r[0]-40),P('33','baro','Luftdruck','kPa',0,110,r=>r[0]),
+ P('0E','timing','Zündwinkel','°',1,60,r=>r[0]/2-64),P('2F','fuel','Tankfüllung','%',0,100,r=>r[0]*100/255),
+ P('42','volt','Bordspannung','V',1,15,r=>(r[0]*256+r[1])/1000),P('5E','rate','Verbrauch','l/h',1,40,r=>(r[0]*256+r[1])/20),
+ P('06','stft1','Gemisch kurz Bank 1','%',1,25,r=>(r[0]-128)*100/128),P('07','ltft1','Gemisch lang Bank 1','%',1,25,r=>(r[0]-128)*100/128),
+ P('08','stft2','Gemisch kurz Bank 2','%',1,25,r=>(r[0]-128)*100/128),P('09','ltft2','Gemisch lang Bank 2','%',1,25,r=>(r[0]-128)*100/128),
+ P('24','lam1','Lambda Bank 1','',2,2,r=>(r[0]*256+r[1])*2/65536),P('25','lam2','Lambda Bank 2','',2,2,r=>(r[0]*256+r[1])*2/65536),P('44','lamc','Lambda Soll','',2,2,r=>(r[0]*256+r[1])*2/65536),
+ P('0A','fuelp','Kraftstoffdruck','kPa',0,800,r=>r[0]*3),P('23','frp','Raildruck','kPa',0,25000,r=>(r[0]*256+r[1])*10),P('22','frpv','Kraftstoffdruck Vorlauf','kPa',0,700,r=>(r[0]*256+r[1])*0.079),
+ P('3C','cat1','Kat Temp B1S1','°C',0,900,r=>(r[0]*256+r[1])/10-40),P('3D','cat2','Kat Temp B2S1','°C',0,900,r=>(r[0]*256+r[1])/10-40),
+ P('3E','cat3','Kat Temp B1S2','°C',0,900,r=>(r[0]*256+r[1])/10-40),P('3F','cat4','Kat Temp B2S2','°C',0,900,r=>(r[0]*256+r[1])/10-40),
+ P('43','aload','Absolute Last','%',0,200,r=>(r[0]*256+r[1])*100/255),P('45','rthr','Relative Drossel','%',0,100,r=>r[0]*100/255),
+ P('47','thrb','Drossel B','%',0,100,r=>r[0]*100/255),P('49','pedd','Gaspedal D','%',0,100,r=>r[0]*100/255),P('4A','pede','Gaspedal E','%',0,100,r=>r[0]*100/255),P('4C','cthr','Drossel Soll','%',0,100,r=>r[0]*100/255),
+ P('5A','rpedal','Gaspedal relativ','%',0,100,r=>r[0]*100/255),P('52','etoh','Ethanol-Anteil','%',0,100,r=>r[0]*100/255),
+ P('2C','egr','AGR Soll','%',0,100,r=>r[0]*100/255),P('2D','egre','AGR Abweichung','%',1,100,r=>(r[0]-128)*100/128),P('2E','evap','Tankentlüftung','%',0,100,r=>r[0]*100/255),
+ P('5D','inj','Einspritzzeitpunkt','°',1,30,r=>(r[0]*256+r[1])/128-210),
+ P('61','tqd','Wunschmoment','%',0,125,r=>r[0]-125),P('62','tqa','Istmoment','%',0,125,r=>r[0]-125),P('63','tqr','Referenzmoment','Nm',0,800,r=>r[0]*256+r[1]),
+ P('1F','run','Motorlaufzeit','s',0,3600,r=>r[0]*256+r[1]),P('21','dmil','Strecke mit Fehlerlampe','km',0,1000,r=>r[0]*256+r[1]),P('31','dclr','Strecke seit Löschen','km',0,1000,r=>r[0]*256+r[1]),
+ P('4D','tmil','Zeit mit Fehlerlampe','min',0,1000,r=>r[0]*256+r[1]),P('4E','tclr','Zeit seit Löschen','min',0,1000,r=>r[0]*256+r[1]),P('30','warm','Warmlaufzyklen seit Löschen','',0,200,r=>r[0]),
+ P('01','dtcn','Gespeicherte Fehler','',0,20,r=>r[0]&127)
+];
+const OBDX=[['boost','Ladedruck relativ','kPa',0,200,v=>v.map!=null&&v.baro!=null?v.map-v.baro:null],
+ ['rmaf','Verbrauch aus Luftmasse (Benzin, geschätzt)','l/h',1,40,v=>v.rate==null&&v.maf!=null?v.maf*3600/(14.7*745):null],
+ ['l100','Verbrauch','l/100km',1,30,v=>{const r=v.rate!=null?v.rate:v.rmaf;return r!=null&&v.spd>5?r*100/v.spd:null}],
+ ['mil','Motorkontrollleuchte','',0,1,v=>v.mil]];
 const DTCTXT={P0100:'Luftmassenmesser Schaltkreis',P0101:'Luftmassenmesser Messbereich',P0113:'Ansauglufttemperatur Signal hoch',P0117:'Kühlmitteltemperatur Signal niedrig',P0118:'Kühlmitteltemperatur Signal hoch',P0128:'Kühlmitteltemperatur unter Thermostat-Solltemperatur',P0130:'Lambdasonde Bank 1 Sensor 1',P0135:'Lambdasonde Heizung Bank 1 Sensor 1',P0171:'Gemisch zu mager Bank 1',P0172:'Gemisch zu fett Bank 1',P0174:'Gemisch zu mager Bank 2',P0300:'Zufällige Zündaussetzer',P0301:'Zündaussetzer Zylinder 1',P0302:'Zündaussetzer Zylinder 2',P0303:'Zündaussetzer Zylinder 3',P0304:'Zündaussetzer Zylinder 4',P0305:'Zündaussetzer Zylinder 5',P0306:'Zündaussetzer Zylinder 6',P0335:'Kurbelwellensensor',P0340:'Nockenwellensensor',P0401:'AGR Durchfluss zu gering',P0420:'Katalysator Wirkungsgrad Bank 1 zu niedrig',P0430:'Katalysator Wirkungsgrad Bank 2 zu niedrig',P0442:'Tankentlüftung kleines Leck',P0455:'Tankentlüftung großes Leck',P0500:'Geschwindigkeitssensor',P0505:'Leerlaufregelung',P0562:'Systemspannung niedrig',P0563:'Systemspannung hoch',P0700:'Getriebesteuerung Fehler',P2002:'Partikelfilter Wirkungsgrad',U0100:'Verbindung zum Motorsteuergerät verloren'};
 const hexSp=l=>(!/\s/.test(l)&&l.length>2&&l.length%2===0&&/^[0-9A-Fa-f]+$/.test(l))?l.replace(/(..)/g,'$1 ').trim():l;
 function obdLines(txt){return String(txt||'').split(/[\r\n]+/).map(l=>l.trim().replace(/^[0-9A-Fa-f]:\s*/,'')).filter(l=>l&&/^[0-9A-Fa-f ]+$/.test(l)).map(hexSp)}
@@ -505,16 +534,20 @@ function parseDtc(txt,mode,can){
 async function obdPoll(){
  if(!OBD.on)return;
  try{
-  for(const [cmd,key,fn] of PIDS){
+  const act=PIDS.filter(p=>!OBD.sup||OBD.sup.has(parseInt(p[0].slice(2),16))&&true).filter(p=>(OBD.fails[p[1]]||0)<3);
+  const fast=act.filter(p=>p[7]),slow=act.filter(p=>!p[7]);let list=fast.slice();
+  for(let n=0;n<3&&slow.length;n++){list.push(slow[(OBD.si||0)%slow.length]);OBD.si=(OBD.si||0)+1}
+  if(!list.length&&OBD.sup){OBD.sup=null;OBD.fails={}}
+  for(const [cmd,key,fn] of list){
    if(!OBD.on)return;
-   if((OBD.fails[key]||0)>=3)continue;
    const r=await Obd.send({cmd,timeout:1500}),b=obdBytes(r.data,cmd);OBD.raw=cmd+' → '+String(r.data).replace(/\s+/g,' ').slice(0,70);
-   if(b&&b.length){OBD.vals[key]=fn(b);OBD.fails[key]=0}else OBD.fails[key]=(OBD.fails[key]||0)+1;
-   renderObd();
+   if(b&&b.length){const v=fn(b);if(isFinite(v)){OBD.vals[key]=v;OBD.fails[key]=0}else OBD.fails[key]=(OBD.fails[key]||0)+1;if(cmd==='0101')OBD.vals.mil=(b[0]&128)?1:0}else OBD.fails[key]=(OBD.fails[key]||0)+1;
   }
+  OBDX.forEach(([k,,,,,fn])=>{const x=fn(OBD.vals);if(x!=null&&isFinite(x))OBD.vals[k]=x});
+  renderObd();
   OBD.err='';
  }catch(e){OBD.err=String(e&&e.message||e);obdDrop();return}
- OBD.timer=setTimeout(obdPoll,250);
+ OBD.timer=setTimeout(obdPoll,20);
 }
 function obdDrop(){OBD.on=false;clearTimeout(OBD.timer);try{if(Obd)Obd.disconnect().catch(()=>{})}catch(_){}renderObd()}
 async function obdConnect(){
@@ -527,7 +560,9 @@ async function obdConnect(){
   for(const c of ['ATZ','ATE0','ATL0','ATS1','ATH0','ATSP0'])await Obd.send({cmd:c,timeout:c==='ATZ'?3000:1500});
   await Obd.send({cmd:'0100',timeout:8000}).catch(()=>{});
   const pr=await Obd.send({cmd:'ATDPN',timeout:1500}).catch(()=>({data:'A6'}));OBD.can=/[6-9]/.test(String(pr.data||'').replace(/^A/i,'').trim().charAt(0));
-  OBD.on=true;OBD.fails={};OBD.vals={};OBD.err='';obdPoll();toast('OBD2 verbunden');
+  OBD.sup=null;
+  try{const set=new Set();let base=0;for(let n=0;n<7;n++){const cmd='01'+base.toString(16).toUpperCase().padStart(2,'0'),r=await Obd.send({cmd,timeout:4000}),bb=obdBytes(r.data,cmd);if(!bb||bb.length<4)break;for(let i=0;i<32;i++)if(bb[i>>3]&(0x80>>(i&7)))set.add(base+i+1);if(!(bb[3]&1))break;base+=0x20}if(set.size)OBD.sup=set}catch(_){}
+  OBD.on=true;OBD.fails={};OBD.vals={};OBD.err='';OBD.si=0;obdPoll();toast('OBD2 verbunden'+(OBD.sup?': '+OBD.sup.size+' Werte vom Steuergerät':''));
  }catch(e){OBD.err=String(e&&e.message||e).slice(0,120);obdDrop()}
  renderObd();
 }
@@ -556,7 +591,10 @@ function renderObd(){
  const v=OBD.vals,f=(k,d=0,u='')=>v[k]==null?'–':(+v[k]).toFixed(d)+u;
  const R='#ff5a4a',G='#3dd68c',B='#3aa0ff';
  const T=(l,val,c)=>`<div class="tile" style="border-left:3px solid ${c}"><div class="small" style="color:${c}">${l}</div><div style="font-size:calc(var(--s,1)*20px);font-weight:700;color:${c}">${val}</div></div>`;
- live.innerHTML=OBD.on?`<div class="allgrid">${T('Drehzahl',f('rpm',0),R)}${T('Tempo OBD',f('spd',0,' km/h'),R)}${T('Kühlmittel',f('cool',0,' °C'),v.cool>105?R:G)}${T('Öl',f('oil',0,' °C'),G)}${T('Ansaugluft',f('iat',0,' °C'),G)}${T('Gaspedal',f('thr',0,' %'),B)}${T('Last',f('load',0,' %'),B)}${T('Tank',f('fuel',0,' %'),B)}${T('Spannung',f('volt',1,' V'),v.volt<11.8?R:G)}${T('Verbrauch',f('rate',1,' l/h'),B)}</div>`:'';
+ const cols=[R,G,B,'#ffb13b'];let ci=0;
+ const all=PIDS.map(p=>[p[1],p[3],p[4],p[5]]).concat(OBDX.map(x=>[x[0],x[1],x[2],x[3]]));
+ const tl=all.filter(([k])=>v[k]!=null).map(([k,l,u,d])=>{const c=cols[ci++%4];const val=k==='mil'?(v[k]?'EIN':'aus'):f(k,d,u?' '+u:'');return T(l,val,k==='mil'&&v[k]?R:c)}).join('');
+ live.innerHTML=OBD.on?`<div class="allgrid">${tl||'<div class="small">Warte auf Werte vom Steuergerät …</div>'}</div><div class="small">${Object.keys(v).length} Werte live${OBD.sup?' · '+OBD.sup.size+' vom Fahrzeug gemeldet':''}</div>`:'';
  const codes=OBD.dtc,pend=OBD.pend;
  let dt='';
  if(codes){dt=codes.length?codes.map(c=>`<div class="small" style="text-align:left"><b>${c}</b> ${esc(dtcName(c))} <button class="rf" data-dtcweb="${c}">online</button></div>`).join(''):'<div class="small" style="color:#3dd68c">Keine Fehler gespeichert</div>';
