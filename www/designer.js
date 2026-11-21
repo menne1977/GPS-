@@ -104,7 +104,11 @@ const PRESETS=[
 ];
 const clone=o=>JSON.parse(JSON.stringify(o));
 function addInst(p,name){const id='i'+(++S.instSeq);const i={id,name:name||p.n,ar:p.ar,els:clone(p.els)};S.inst.push(i);save();return i}
-if(!Array.isArray(S.inst)){S.inst=[];PRESETS.forEach(p=>addInst(p))}
+const OLDN=['Fein-Tacho (3 Ziffern + 2 Nachkommastellen)','Zähler (Tag, Tour, Gesamt, Rückwärts)','Wetter und Höhe (mit Höchst- und Tiefstwert)','Hochformat-Tacho'];
+if(!Array.isArray(S.inst))S.inst=[];
+if(S.simpleV!==2){S.simpleV=2;S.lay={};S.biV=[];S.inst=S.inst.filter(i=>!i.bk&&!OLDN.includes(i.name));
+ S.widgets&&WIDGETS.forEach(w=>{if(S.widgets[w.id])S.widgets[w.id].scale=1})}
+PRESETS.splice(0,4);
 const instById=id=>S.inst.find(i=>i.id===id);
 
 // ---------- Layout ----------
@@ -128,7 +132,7 @@ function repack(L,o){
 }
 function sync(L,p,o,fresh){
  const have=new Set(L.items.map(i=>i.k+':'+i.id));
- WIDGETS.forEach(w=>{if(!have.has('w:'+w.id)){const on=(p==='moto'?MOTO_ON:CAR_ON).includes(w.id)&&(p==='moto'||S.widgets[w.id].on!==false);const it=newItem('w',w.id,o,on);L.items.push(it)}});
+ WIDGETS.forEach(w=>{if(!have.has('w:'+w.id)){const on=(fresh&&['warn'].includes(w.id));const it=newItem('w',w.id,o,on);L.items.push(it)}});
  S.inst.forEach(i=>{if(!have.has('i:'+i.id))L.items.push(newItem('i',i.id,o,false))});
  const ok=new Set(WIDGETS.map(w=>'w:'+w.id).concat(S.inst.map(i=>'i:'+i.id)));
  L.items=L.items.filter(i=>ok.has(i.k+':'+i.id));
@@ -405,9 +409,9 @@ addEventListener('resize',()=>{edSize()});
 // ---------- Menü ----------
 function visHtml(){
  const L=getLay();
- return L.items.map(it=>{
+ return L.items.slice().sort((a,b)=>(a.k==='i'?0:1)-(b.k==='i'?0:1)).map(it=>{
   const key=keyOf(it),c=it.k==='w'?`<input type="color" data-w="${it.id}" data-k="color" value="${S.widgets[it.id].color}">`:`<button data-ied="${it.id}">Bearbeiten</button>`;
-  return `<div class="row"><label><input type="checkbox" data-vis="${key}" ${it.on?'checked':''}> ${esc2(nameOf(it))}</label>${c}</div>`;
+  return `<div class="row"><label><input type="checkbox" data-vis="${key}" ${it.on?'checked':''}> ${it.k==='w'?'Klassisch: ':''}${esc2(nameOf(it))}</label>${c}</div>`;
  }).join('');
 }
 function menuHtml(){
@@ -433,13 +437,16 @@ function menuHtml(){
  <div class="small">${S.cd&&S.cd.target?'Rest: '+SRC.countdown.g().toFixed(1)+' km':'Nicht aktiv'}</div>
  <div class="row"><label>Höhe höchste ${S.altst.max==null?'–':Math.round(S.altst.max)} m, tiefste ${S.altst.min==null?'–':Math.round(S.altst.min)} m</label><button data-rs="altMax">Zurücksetzen</button></div>`;
 }
-const OPEN=new Set(['Profil & Layout']);
+const OPEN=new Set(['Ansicht & Layout']);
+const GROUPS=[['Ansicht & Layout',['Profil & Layout','Anzeigen','Allgemein']],['Tachos & Übersichten',['Instrumente']],['Zähler, Tour & Tank',['Zähler & Höhe','Tank & Reichweite']],['Fahrzeug & Apps',['Fahrzeug & Apps']],['Stimme (KITT)',['Sprachassistent (KITT)']],['Internet & Daten',['Datenquellen (Abruf nur im Intervall)','Stau-Meldung','Daten & Sensoren']]];
+const SHOWN={'Anzeigen':'Fenster ein/aus','Allgemein':'Anzeige','Datenquellen (Abruf nur im Intervall)':'Datenquellen','Daten & Sensoren':'Sensoren & Zurücksetzen','Zähler & Höhe':'Zähler & Höhe','Tank & Reichweite':'Tank'};
 function collapse(h){
- const parts=h.split('<h3>');let out=parts[0];
- for(let i=1;i<parts.length;i++){
-  const j=parts[i].indexOf('</h3>'),title=parts[i].slice(0,j),body=parts[i].slice(j+5),plain=title.replace(/&amp;/g,'&');
-  out+=`<details class="sub" data-t="${plain.replace(/"/g,'')}" ${OPEN.has(plain)?'open':''}><summary>${title}</summary>${body}</details>`;
- }
+ const parts=h.split('<h3>');let out=parts[0];const sec={};
+ for(let i=1;i<parts.length;i++){const j=parts[i].indexOf('</h3>'),title=parts[i].slice(0,j).replace(/&amp;/g,'&');sec[title]=parts[i].slice(j+5)}
+ GROUPS.forEach(([g,list])=>{
+  const body=list.filter(t=>sec[t]!=null).map(t=>(list.length>1?`<div class="sech">${esc2(SHOWN[t]||t)}</div>`:'')+sec[t]).join('');
+  out+=`<details class="sub" data-t="${esc2(g)}" ${OPEN.has(g)?'open':''}><summary>${esc2(g)}</summary>${body}</details>`;
+ });
  return out;
 }
 document.addEventListener('toggle',e=>{const d=e.target;if(d&&d.classList&&d.classList.contains('sub')){d.open?OPEN.add(d.dataset.t):OPEN.delete(d.dataset.t)}},true);
@@ -478,8 +485,8 @@ function splitNav(){
 $('#prof').onclick=()=>{S.prof=S.prof==='moto'?'car':'moto';save();applyCfgNew();renderAll();toast(S.prof==='moto'?'Profil 2: Motorrad':'Profil 1: Auto',2000)};
 $('#edt').onclick=()=>{st.editing=!st.editing;applyCfgNew()};
 $('#ed-done').onclick=()=>{st.editing=false;save();applyCfgNew()};
-$('#ed-add').onclick=()=>{st.editing=false;applyCfgNew();OPEN.add('Instrumente');buildPanel();$('#menu').classList.add('open')};
-$('#ed-show').onclick=()=>{st.editing=false;applyCfgNew();OPEN.add('Anzeigen');buildPanel();$('#menu').classList.add('open')};
+$('#ed-add').onclick=()=>{st.editing=false;applyCfgNew();OPEN.add('Tachos & Übersichten');buildPanel();$('#menu').classList.add('open')};
+$('#ed-show').onclick=()=>{st.editing=false;applyCfgNew();OPEN.add('Ansicht & Layout');buildPanel();$('#menu').classList.add('open')};
 $('#ed-reset').onclick=()=>{if(confirm('Layout dieses Profils zurücksetzen?')){delete S.lay[S.prof][orient()];save();applyCfgNew()}};
 new ResizeObserver(()=>{if(!drag)applyCfgNew()}).observe(app);
 addEventListener('orientationchange',()=>setTimeout(applyCfgNew,200));
@@ -501,6 +508,15 @@ const CARS=[['Erlaubt','limit',{unit:'km/h',color:'#ff5a4a'}],['Außen','temp',{
 const MOTS=[['Außen','temp',{unit:'°C',color:'#3dd68c'}],['Höhe','alt',{unit:'m',color:'#3aa0ff'}],['Tag','dayKm',{dec:1,unit:'km',color:'#ff5a4a',dt:'reset'}],['Tour','tourKm',{dec:1,unit:'km',color:'#3dd68c',dt:'reset'}],
  ['Höchste','altMax',{unit:'m',color:'#ff5a4a',dt:'reset'}],['Tiefste','altMin',{unit:'m',color:'#7fe0ff',dt:'reset'}],['Rückwärts','countdown',{dec:1,unit:'km',color:'#ffb13b',dt:'reset'}],['Reichweite','range',{unit:'km',color:'#3dd68c'}]];
 const speedBlock=(ac,fine)=>[SPD(ac),VAL(7,32,26,30,'speed',{digits:3,dec:0,pad:true,size:26,mono:true,align:'center',dt:'zoom',color:'#ffffff'}),TXT(7,60,26,7,'km/h',6,'#8fa3b8','center'),VAL(7,68,26,12,'speed',{digits:3,dec:2,pad:true,size:10,mono:true,align:'center',color:ac===('#3aa0ff')?'#ffb13b':'#ffd27a'})];
+
+const LST=(srcs)=>[BG,{t:'list',x:2,y:2,w:96,h:96,srcs,size:3.6,color:'#ffffff'}];
+const OBDALL=['rpm','cool','oil','iat','thr','load','volt','rate'].concat(SRCKEYS.filter(k=>k.startsWith('o_')));
+PRESETS.push(
+ {bk:'ov-all',n:'Übersicht: Alle OBD-Werte (scrollbar)',ar:1,els:LST(OBDALL)},
+ {bk:'ov-mot',n:'Übersicht: Motor (OBD)',ar:1,els:LST(['rpm','cool','oil','iat','thr','load','volt','o_map','o_maf','o_lam1','rate','o_l100','fuelLvl','o_boost'])},
+ {bk:'ov-wx',n:'Übersicht: Wetter, Höhe, Umgebung',ar:1,els:LST(['temp','gust','rain','alt','altMax','altMin','heading','dir','road','sats','gpsAcc','time'])},
+ {bk:'ov-fahrt',n:'Übersicht: Fahrt und Zähler',ar:1,show:[['car','port',100],['moto','port',100]],els:LST(['speed','limit','accel','dayKm','dayMax','dayAvg','tourKm','tourMin','tripKm','totalKm','countdown','range','fuelNext'])}
+);
 PRESETS.push(
  {bk:'car-q',n:'Auto: Quer, alle Daten',ar:1.7778,show:[['car','land',58]],els:[BG].concat(speedBlock('#3aa0ff'),grid(CARQ,40,4,58,92,3,4,2))},
  {bk:'car-g',n:'Auto: Geteilt, gut lesbar',ar:1,show:[['car','port',100]],els:[BG,

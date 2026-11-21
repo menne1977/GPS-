@@ -62,7 +62,9 @@ button.rf{margin-top:6px;padding:6px 12px;font-size:13px}
 #open{position:fixed;top:6px;right:6px;z-index:5;background:#22303f;color:var(--txt);border:0;border-radius:8px;padding:6px 10px;font-size:18px}
 #menu{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;justify-content:flex-end;z-index:50}
 #menu.open{display:flex}
-#panel{background:var(--card);width:min(380px,100%);height:100%;overflow:auto;padding:14px;font-size:14px}
+#panel{background:var(--card);width:min(340px,100%);height:100%;overflow:auto;padding:10px 12px;font-size:13px}
+#panel .row{margin:3px 0}
+.sech{color:#9fb0c3;font-size:12px;margin:10px 0 2px;text-transform:uppercase;letter-spacing:.04em}
 #panel h3{margin:16px 0 6px;color:var(--ok);font-size:15px}
 .row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0;flex-wrap:wrap}
 button{background:#22303f;color:var(--txt);border:0;border-radius:8px;padding:8px 10px;font-size:14px}
@@ -93,6 +95,7 @@ body.edit .w{overflow:hidden}
 #ied-pal{display:flex;gap:6px;flex-wrap:wrap;padding:6px 8px}
 #ied-props{max-height:38vh;overflow:auto;border-top:1px solid #223040;padding-bottom:10px}
 details.sub{border-bottom:1px solid #223040;padding:4px 0}
+.row>button{padding:5px 9px;font-size:12px}
 details.sub>summary{cursor:pointer;color:var(--ok);font-size:15px;font-weight:700;padding:8px 0;list-style:none}
 details.sub>summary::before{content:'▸ '}
 details.sub[open]>summary::before{content:'▾ '}
@@ -756,7 +759,23 @@ function kittAnswer(t){
  if(has(/scanner|scan/i))return `Scanner aktiv. Ich sehe Geschwindigkeit, Wetter und Stau, ${A}.`;
  if(has(/fahr los|los geht|gas geben/i))return `Dann mal los, ${A}. Ich halte den Scanner offen.`;
  if(has(/danke/))return `Gern geschehen, ${A}.`;
+ if(S.global.online!==false&&c.split(' ').length>=2)return wikiAnswer(c,A);
  return `Das habe ich nicht verstanden, ${A}.`;
+}
+async function wikiAnswer(c,A){
+ const q=c.replace(/^(kitt )?(sag mir |sage mir |erkläre mir |erkläre |erklär mir |erklär |was ist |was sind |was bedeutet |wer ist |wer war |wer sind |wo liegt |wo ist |wann war |wie hoch ist |wie alt ist |wie groß ist |wie funktioniert |was weißt du über |erzähl mir was über |erzähl mir etwas über |erzähl mir von )+/,'').replace(/^(ein |eine |der |die |das |den |dem )/,'').trim();
+ if(!q)return `Das habe ich nicht verstanden, ${A}.`;
+ try{
+  const sr=await (await fetch('https://de.wikipedia.org/w/api.php?action=query&list=search&format=json&origin=*&srlimit=1&srsearch='+encodeURIComponent(q))).json();
+  const t=sr&&sr.query&&sr.query.search&&sr.query.search[0]&&sr.query.search[0].title;
+  if(!t)return `Dazu habe ich online nichts gefunden, ${A}.`;
+  const su=await (await fetch('https://de.wikipedia.org/api/rest_v1/page/summary/'+encodeURIComponent(t))).json();
+  const ex=String(su.extract||'').replace(/\([^)]*\)/g,'').replace(/\s+/g,' ').trim();
+  if(!ex)return `Dazu habe ich online nichts gefunden, ${A}.`;
+  const sn=ex.match(/[^.!?]+[.!?]+(\s|$)/g)||[ex];
+  let out='';for(const x of sn){if((out+x).length>300&&out)break;out+=x}
+  return out.trim();
+ }catch(e){return `Dafür brauche ich eine Internetverbindung, ${A}.`}
 }
 
 function renderTour(){
@@ -1021,9 +1040,7 @@ function buildPanel(){
  <p>Trip: Der Knopf unter der Trip-Anzeige setzt die Tagesstrecke auf null. Tankstellen und Stau kannst du mit „Aktualisieren“ sofort neu abrufen.</p>
  </details>${window.DZ?DZ.menu():''}<h3>Anzeigen</h3>`;
  if(window.DZ)h+=DZ.vis();else WIDGETS.forEach(w=>{const c=S.widgets[w.id];h+=`<div class="row"><label><input type="checkbox" data-w="${w.id}" data-k="on" ${c.on?'checked':''}> ${w.name}</label><input type="color" data-w="${w.id}" data-k="color" value="${c.color}"><input type="range" min="0.6" max="1.8" step="0.05" value="${c.scale}" data-w="${w.id}" data-k="scale" style="width:90px"></div>`});
- h+=`<h3>Heute</h3>
- <div class="small">Höchstwert: ${Math.round(S.day.max)} km/h · Ø bewegt: ${S.day.mt>0?Math.round(S.day.dist/(S.day.mt/3600000)):0} km/h · Strecke: ${S.day.dist.toFixed(1)} km</div>
- <h3>Datenquellen (Abruf nur im Intervall)</h3>
+ h+=` <h3>Datenquellen (Abruf nur im Intervall)</h3>
  <div class="row"><label>Sparmodus (alle Abrufe aus)</label><input type="checkbox" data-g="sparmodus" ${S.global.sparmodus?'checked':''}></div>
  <div class="row"><label>Wetter (Open-Meteo)</label><input type="checkbox" data-src="weather" ${s.weather?'checked':''}><label>min</label><input type="number" min="10" max="180" data-iv="weather" value="${iv.weather}" style="width:70px"></div>
  <div class="row"><label>DWD-Warnung</label><input type="checkbox" data-src="dwd" ${s.dwd?'checked':''}><label>min</label><input type="number" min="15" max="180" data-iv="dwd" value="${iv.dwd}" style="width:70px"></div>
@@ -1032,6 +1049,7 @@ function buildPanel(){
  <div class="row"><label>Autobahn-Meldungen (bundesweit)</label><input type="checkbox" data-src="autobahn" ${s.autobahn?'checked':''}></div>
  <div class="row"><label>Hitzewarnung (DWD)</label><input type="checkbox" data-src="heat" ${s.heat?'checked':''}></div>
  <div class="row"><label>GPS-Satelliten (nur APK)</label><input type="checkbox" data-src="sat" ${s.sat?'checked':''}></div>
+ <div class="row"><label>Online-Antworten per Sprache (Wikipedia)</label><input type="checkbox" data-g="online" ${S.global.online!==false?'checked':''}></div>
  <div class="row"><label>Tempolimit (OSM)</label><input type="checkbox" data-src="limit" ${s.limit?'checked':''}></div>
  <h3>Allgemein</h3>
  <div class="row"><label>Tacho-Stil</label><select data-g="style">${[['digital','Digital'],['analog','Analog'],['cockpit','Cockpit (Querformat)'],['rund','Rund (Querformat)'],['sport','Sport (Querformat)'],['racer','Racer blau (Querformat)'],['robust','Robust (Querformat)'],['neutral','Neutral (Querformat)'],['spiel','Verspielt (Querformat)']].map(([k,l])=>`<option value="${k}" ${S.global.style===k?'selected':''}>${l}</option>`).join('')}</select></div>
@@ -1053,9 +1071,6 @@ function buildPanel(){
  <div class="row"><label>Tankinhalt (l)</label><input type="number" min="0" max="120" step="0.5" data-g="tankMax" value="${S.global.tankMax??''}" style="width:90px"></div>
  <div class="row"><label>Verbrauch (l/100 km)</label><input type="number" min="0" max="60" step="0.1" data-g="verbrauch" value="${S.global.verbrauch??''}" style="width:90px"></div>
  <div class="row"><label>Tankstand jetzt (l)</label><input type="number" min="0" max="120" step="0.5" data-g="tankL" value="${S.global.tankL??''}" style="width:90px"></div>
- <h3>Eigene Anzeige</h3>
- <textarea data-g="tpl" rows="3" style="width:100%">${esc(S.global.tpl)}</textarea>
- <div class="small">Platzhalter: {speed} {limit} {temp} {km} {trip} {time}</div>
  <h3>Stau-Meldung</h3>
  <div class="row"><input id="rep" placeholder="z. B. Stau A7 Ausfahrt 12" style="flex:1"><button id="addrep">+</button></div>
  <h3>Sprachassistent (KITT)</h3>
