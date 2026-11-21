@@ -124,8 +124,9 @@ public class AppCtlPlugin extends Plugin {
 
     @PluginMethod
     public void adjacent(PluginCall call) {
-        Intent li = getContext().getPackageManager().getLaunchIntentForPackage("com.google.android.apps.maps");
-        if (li == null) { call.reject("Keine Karten-App gefunden"); return; }
+        String pk = call.getString("pkg", "com.google.android.apps.maps");
+        Intent li = getContext().getPackageManager().getLaunchIntentForPackage(pk);
+        if (li == null) { call.reject("App nicht gefunden"); return; }
         li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
         getContext().startActivity(li);
         call.resolve();
@@ -136,9 +137,18 @@ public class AppCtlPlugin extends Plugin {
         PackageManager pm = getContext().getPackageManager();
         List<ResolveInfo> list = pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0);
         JSArray a = new JSArray();
-        for (ResolveInfo ri : list) a.put(String.valueOf(ri.loadLabel(pm)));
+        JSArray full = new JSArray();
+        for (ResolveInfo ri : list) {
+            String lb = String.valueOf(ri.loadLabel(pm));
+            a.put(lb);
+            JSObject it = new JSObject();
+            it.put("l", lb);
+            it.put("p", ri.activityInfo.packageName);
+            full.put(it);
+        }
         JSObject o = new JSObject();
         o.put("apps", a);
+        o.put("list", full);
         call.resolve(o);
     }
 

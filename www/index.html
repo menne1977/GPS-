@@ -60,7 +60,7 @@ button.rf{margin-top:6px;padding:6px 12px;font-size:13px}
 #boost.on{display:flex}
 @keyframes pulse{from{opacity:.75}to{opacity:1}}
 #open{position:fixed;top:6px;right:6px;z-index:5;background:#22303f;color:var(--txt);border:0;border-radius:8px;padding:6px 10px;font-size:18px}
-#menu{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;justify-content:flex-end;z-index:9}
+#menu{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;justify-content:flex-end;z-index:50}
 #menu.open{display:flex}
 #panel{background:var(--card);width:min(380px,100%);height:100%;overflow:auto;padding:14px;font-size:14px}
 #panel h3{margin:16px 0 6px;color:var(--ok);font-size:15px}
@@ -68,7 +68,7 @@ button.rf{margin-top:6px;padding:6px 12px;font-size:13px}
 button{background:#22303f;color:var(--txt);border:0;border-radius:8px;padding:8px 10px;font-size:14px}
 input[type=color]{width:44px;height:28px;border:0;background:none}
 input,select,textarea{background:#0b0f14;color:#fff;border:0;border-radius:8px;padding:6px}
-#app{display:block;position:relative;padding:0;overflow:auto}
+#app{display:block;position:relative;padding:0;overflow:auto;isolation:isolate;z-index:0}
 .w{position:absolute;flex:none;min-width:0;min-height:0;overflow:hidden auto;padding:6px}
 .w.inst{padding:0;background:none;overflow:hidden}
 .w.inst .ib{position:absolute;inset:0}

@@ -413,7 +413,8 @@ function menuHtml(){
  <div class="row"><button id="dz-edit">Fenster verschieben und anpassen</button></div>
  <div class="row"><label>Am Raster einrasten</label><input type="checkbox" id="dz-grid" ${S.grid?'checked':''}></div>
  <div class="row"><button id="dz-lreset">Layout dieses Profils zurücksetzen (${o==='land'?'Querformat':'Hochformat'})</button></div>
- <div class="row"><button id="dz-split">Geteilter Bildschirm mit Navigation</button></div>
+ <div class="row"><label>App neben KITT</label><select id="dz-splitapp" style="max-width:190px">${(S.splitApps||[]).map(a=>`<option value="${esc2(a.p)}" ${S.splitPkg===a.p?'selected':''}>${esc2(a.l)}</option>`).join('')||'<option value="">(Liste laden)</option>'}</select></div>
+ <div class="row"><button id="dz-splitload">App-Liste laden</button><button id="dz-split">Geteilt starten</button></div>
  <h3>Instrumente</h3>
  ${S.inst.map(i=>`<div class="row"><label>${esc2(i.name)}</label><span><button data-ied="${i.id}">Bearbeiten</button><button data-idup="${i.id}">Kopie</button><button data-idel="${i.id}">Löschen</button></span></div>`).join('')||'<div class="small">Noch keine Instrumente.</div>'}
  <div class="row"><button id="dz-new">Neues leeres Instrument</button></div>
@@ -443,6 +444,7 @@ $('#panel').addEventListener('input',e=>{
  const t=e.target;
  if(t.dataset.vis){const [k,id]=t.dataset.vis.split(':');['port','land'].forEach(o=>{const L=layFor(S.prof,o),it=L.items.find(x=>x.k===k&&x.id===id);if(it){it.on=t.checked;if(t.checked&&o===orient()){it.z=Math.max(1,...L.items.map(x=>x.z||1))+1}}});save();applyCfgNew()}
  if(t.id==='dz-prof'){S.prof=t.value;save();applyCfgNew();renderAll();refreshMenu()}
+ if(t.id==='dz-splitapp'){S.splitPkg=t.value;save()}
  if(t.id==='dz-grid'){S.grid=t.checked;save()}
 });
 $('#panel').addEventListener('click',e=>{
@@ -458,12 +460,13 @@ $('#panel').addEventListener('click',e=>{
  if(id==='dz-cdset'){const v=+$('#dz-cd').value;if(v>0){S.cd={target:v,ref:S.trip.total};save();refreshMenu();toast('Rückwärtszähler läuft: '+v+' km',3000)}else toast('Bitte eine Strecke in km eintragen',3000)}
  if(id==='dz-cdoff'){S.cd=null;save();refreshMenu()}
  if(id==='dz-split'){splitNav()}
+ if(id==='dz-splitload'){if(!AppCtl){toast('Nur in der APK');return}AppCtl.apps().then(r=>{S.splitApps=(r.list||[]).sort((a,b)=>a.l.localeCompare(b.l));if(!S.splitPkg&&S.splitApps.length)S.splitPkg=S.splitApps[0].p;save();refreshMenu();toast(S.splitApps.length+' Apps geladen. Jetzt oben auswählen.',3000)}).catch(()=>toast('Liste nicht verfügbar'))}
 });
 function splitNav(){
  if(!AppCtl){toast('Nur in der APK');return}
  AppCtl.accessEnabled().then(r=>{
-  if(r.enabled){AppCtl.ui({action:'split'}).catch(()=>{});setTimeout(()=>AppCtl.adjacent().catch(()=>{}),1300);$('#menu').classList.remove('open')}
-  else{AppCtl.adjacent().catch(()=>{});toast('Zum Teilen: in Android „Letzte Apps“ öffnen, bei KITT auf das Symbol tippen und „Geteilter Bildschirm“ wählen. Mit eingeschalteter Bedienungshilfe geht es automatisch.',9000)}
+  if(r.enabled){AppCtl.ui({action:'split'}).catch(()=>{});setTimeout(()=>AppCtl.adjacent({pkg:S.splitPkg||undefined}).catch(()=>toast('App nicht gefunden')),1300);$('#menu').classList.remove('open')}
+  else{AppCtl.adjacent({pkg:S.splitPkg||undefined}).catch(()=>toast('App nicht gefunden'));toast('Zum Teilen: in Android „Letzte Apps“ öffnen, bei KITT auf das Symbol tippen und „Geteilter Bildschirm“ wählen. Mit eingeschalteter Bedienungshilfe geht es automatisch.',9000)}
  });
 }
 
