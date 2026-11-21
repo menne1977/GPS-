@@ -480,6 +480,47 @@ $('#ed-reset').onclick=()=>{if(confirm('Layout dieses Profils zurücksetzen?')){
 new ResizeObserver(()=>{if(!drag)applyCfgNew()}).observe(app);
 addEventListener('orientationchange',()=>setTimeout(applyCfgNew,200));
 
+
+// ---------- Fertige Tachos Auto / Motorrad ----------
+const BG={t:'rect',x:0,y:0,w:100,h:100,fill:'#0b1118',stroke:'#1d2733',sw:0,r:4};
+const CELL=(x,y,w,h,lab,src,o)=>{o=o||{};const c=o.color||'#ffffff';return[CARD(x,y,w,h),TXT(x+w*0.06,y+h*0.07,w*0.88,h*0.24,lab,h*0.2,'#8fa3b8','left'),VAL(x+w*0.06,y+h*0.33,w*0.88,h*0.6,src,{dec:o.dec!=null?o.dec:0,size:h*(o.sz||0.46),unit:o.unit||'',color:c,dt:o.dt||'',warn:o.warn,align:'left'})]};
+const SPD=(ac)=>({t:'arc',x:2,y:6,w:36,h:88,src:'speed',min:0,max:220,a0:-135,sweep:270,th:8,color:ac,bg:'#17324d',warn:130,color2:'#ff5a4a',ticks:true});
+function grid(cells,x0,y0,W,H,cols,rows,gap){const cw=(W-gap*(cols-1))/cols,ch=(H-gap*(rows-1))/rows;let r=[];cells.forEach((c,i)=>{const cx=i%cols,cy=Math.floor(i/cols);r=r.concat(CELL(x0+cx*(cw+gap),y0+cy*(ch+gap),cw,ch,c[0],c[1],c[2]))});return r}
+const CARQ=[['Erlaubt','limit',{unit:'km/h',color:'#ff5a4a'}],['Außen','temp',{unit:'°C',color:'#3dd68c'}],['Höhe NN','alt',{unit:'m',color:'#3aa0ff'}],['Kurs','dir',{color:'#ffb13b'}],
+ ['Tag','dayKm',{dec:1,unit:'km',color:'#ff5a4a',dt:'reset'}],['Tour','tourKm',{dec:1,unit:'km',color:'#3dd68c',dt:'reset'}],['Gesamt','totalKm',{unit:'km',color:'#3aa0ff'}],['Rückwärts','countdown',{dec:1,unit:'km',color:'#ffb13b',dt:'reset'}],
+ ['Beschl.','accel',{dec:1,unit:'m/s²'}],['Reichweite','range',{unit:'km',color:'#3dd68c'}],['Drehzahl','rpm',{unit:'U/min',color:'#ff5a4a'}],['Uhrzeit','time',{color:'#ffffff'}]];
+const MOTQ=[['Außen','temp',{unit:'°C',color:'#3dd68c'}],['Kühlmittel','cool',{unit:'°C',color:'#ff5a4a'}],['Öl','oil',{unit:'°C',color:'#ffb13b'}],['Höhe NN','alt',{unit:'m',color:'#3aa0ff'}],
+ ['Höchste','altMax',{unit:'m',color:'#ff5a4a',dt:'reset'}],['Tiefste','altMin',{unit:'m',color:'#7fe0ff',dt:'reset'}],['Tag','dayKm',{dec:1,unit:'km',color:'#ff5a4a',dt:'reset'}],['Tour','tourKm',{dec:1,unit:'km',color:'#3dd68c',dt:'reset'}],
+ ['Gesamt','totalKm',{unit:'km',color:'#3aa0ff'}],['Rückwärts','countdown',{dec:1,unit:'km',color:'#ffb13b',dt:'reset'}],['Reichweite','range',{unit:'km',color:'#3dd68c'}],['Kurs','dir',{color:'#ffffff'}]];
+const CARS=[['Erlaubt','limit',{unit:'km/h',color:'#ff5a4a'}],['Außen','temp',{unit:'°C',color:'#3dd68c'}],['Tag','dayKm',{dec:1,unit:'km',color:'#ff5a4a',dt:'reset'}],['Tour','tourKm',{dec:1,unit:'km',color:'#3dd68c',dt:'reset'}],
+ ['Höhe','alt',{unit:'m',color:'#3aa0ff'}],['Rückwärts','countdown',{dec:1,unit:'km',color:'#ffb13b',dt:'reset'}],['Reichweite','range',{unit:'km',color:'#3dd68c'}],['Uhrzeit','time',{}]];
+const MOTS=[['Außen','temp',{unit:'°C',color:'#3dd68c'}],['Höhe','alt',{unit:'m',color:'#3aa0ff'}],['Tag','dayKm',{dec:1,unit:'km',color:'#ff5a4a',dt:'reset'}],['Tour','tourKm',{dec:1,unit:'km',color:'#3dd68c',dt:'reset'}],
+ ['Höchste','altMax',{unit:'m',color:'#ff5a4a',dt:'reset'}],['Tiefste','altMin',{unit:'m',color:'#7fe0ff',dt:'reset'}],['Rückwärts','countdown',{dec:1,unit:'km',color:'#ffb13b',dt:'reset'}],['Reichweite','range',{unit:'km',color:'#3dd68c'}]];
+const speedBlock=(ac,fine)=>[SPD(ac),VAL(7,32,26,30,'speed',{digits:3,dec:0,pad:true,size:26,mono:true,align:'center',dt:'zoom',color:'#ffffff'}),TXT(7,60,26,7,'km/h',6,'#8fa3b8','center'),VAL(7,68,26,12,'speed',{digits:3,dec:2,pad:true,size:10,mono:true,align:'center',color:ac===('#3aa0ff')?'#ffb13b':'#ffd27a'})];
+PRESETS.push(
+ {bk:'car-q',n:'Auto: Quer, alle Daten',ar:1.7778,show:[['car','land',58]],els:[BG].concat(speedBlock('#3aa0ff'),grid(CARQ,40,4,58,92,3,4,2))},
+ {bk:'car-g',n:'Auto: Geteilt, gut lesbar',ar:1,show:[['car','port',100]],els:[BG,
+  VAL(3,2,60,30,'speed',{digits:3,dec:0,pad:true,size:28,mono:true,align:'left',dt:'zoom'}),TXT(62,20,34,8,'km/h',6,'#8fa3b8','left'),
+  VAL(60,6,38,12,'speed',{digits:3,dec:2,pad:true,size:7.5,mono:true,align:'right',color:'#ffb13b'}),
+  {t:'bar',x:3,y:33,w:94,h:4,src:'speed',min:0,max:220,dir:'h',rev:false,color:'#3dd68c',bg:'#17324d',warn:130,color2:'#ff5a4a'}].concat(grid(CARS,3,40,94,57,2,4,2))},
+ {bk:'mot-q',n:'Motorrad: Quer, alle Daten',ar:1.7778,show:[['moto','land',58]],els:[BG].concat(speedBlock('#ff8a2a'),grid(MOTQ,40,4,58,92,3,4,2))},
+ {bk:'mot-g',n:'Motorrad: Geteilt, gut lesbar',ar:1,show:[['moto','port',100]],els:[BG,
+  VAL(3,2,60,30,'speed',{digits:3,dec:0,pad:true,size:28,mono:true,align:'left',dt:'zoom',color:'#ffb13b'}),TXT(62,20,34,8,'km/h',6,'#8fa3b8','left'),
+  VAL(60,6,38,12,'speed',{digits:3,dec:2,pad:true,size:7.5,mono:true,align:'right',color:'#ffffff'}),
+  {t:'bar',x:3,y:33,w:94,h:4,src:'speed',min:0,max:220,dir:'h',rev:false,color:'#ff8a2a',bg:'#3a2412',warn:130,color2:'#ff3a2a'}].concat(grid(MOTS,3,40,94,57,2,4,2))},
+ {bk:'car-m',n:'Auto: Mini quer (wenig Daten)',ar:3,els:[BG,VAL(2,6,40,88,'speed',{digits:3,dec:0,pad:true,size:70,mono:true,align:'left',dt:'zoom'}),TXT(40,60,10,20,'km/h',16,'#8fa3b8','left')].concat(grid([['Erlaubt','limit',{unit:'',color:'#ff5a4a'}],['Außen','temp',{unit:'°',color:'#3dd68c'}],['Uhrzeit','time',{}]],52,6,46,88,3,1,2))},
+ {bk:'mot-m',n:'Motorrad: Mini quer (wenig Daten)',ar:3,els:[BG,VAL(2,6,40,88,'speed',{digits:3,dec:0,pad:true,size:70,mono:true,align:'left',dt:'zoom',color:'#ffb13b'}),TXT(40,60,10,20,'km/h',16,'#8fa3b8','left')].concat(grid([['Außen','temp',{unit:'°',color:'#3dd68c'}],['Höhe','alt',{unit:'m',color:'#3aa0ff'}],['Tour','tourKm',{dec:1,color:'#3dd68c',dt:'reset'}]],52,6,46,88,3,1,2))}
+);
+S.biV=S.biV||[];
+PRESETS.filter(p=>p.bk&&!S.biV.includes(p.bk)).forEach(p=>{
+ const i=addInst(p);i.bk=p.bk;S.biV.push(p.bk);
+ (p.show||[]).forEach(([pr,o,w])=>{
+  const L=layFor(pr,o),it=L.items.find(x=>x.k==='i'&&x.id===i.id);if(!it)return;
+  it.w=w;it.h=Math.round(w/p.ar);it.x=(100-w)/2;it.y=0;it.on=true;
+  L.items.forEach(x=>{if(x!==it)x.y+=it.h+1});
+ });
+});
+save();
 window.DZ={menu:menuHtml,collapse,vis:visHtml};
 applyCfgNew();buildPanel();renderAll();tickAll();
 })();
